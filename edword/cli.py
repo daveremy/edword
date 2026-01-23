@@ -171,6 +171,9 @@ def analyze(
     chapters: Optional[str] = typer.Option(
         None, "--chapters", "-ch", help="Chapter range (e.g., '1-8')"
     ),
+    no_codex: bool = typer.Option(
+        False, "--no-codex", help="Skip loading codex (faster for large codex)"
+    ),
     save: bool = typer.Option(
         False, "--save", "-s", help="Save report to file"
     ),
@@ -237,9 +240,9 @@ def analyze(
 
     console.print(f"[dim]Manuscript: {len(manuscript):,} characters[/dim]")
 
-    # Load codex if available
+    # Load codex if available and not disabled
     codex = ""
-    if project.has_codex:
+    if project.has_codex and not no_codex:
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -248,6 +251,8 @@ def analyze(
             progress.add_task("Loading codex...", total=None)
             codex = load_codex(project.codex_dir)
         console.print(f"[dim]Codex: {len(codex):,} characters[/dim]")
+    elif no_codex:
+        console.print(f"[dim]Codex: skipped (--no-codex)[/dim]")
 
     # Determine which passes to run
     if pass_names:

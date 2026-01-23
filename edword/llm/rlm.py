@@ -43,47 +43,25 @@ class RLMStats:
 
 def build_system_prompt(context_size: int, depth: int = 0) -> str:
     """Build the RLM system prompt."""
-    return f"""You are an AI analyzing a document using a Python REPL environment.
+    return f"""You are executing Python code to analyze a document. I will run your code and show you the output.
 
-The document is stored in variable `context` (size: {context_size:,} characters).
-Current recursion depth: {depth}
+CRITICAL: You MUST respond with a Python code block. Your code will be executed and the output shown to you.
 
-AVAILABLE IN REPL:
-- context: str (the full document)
-- recursive_llm(query, sub_context) -> str (process a chunk with a sub-query)
-- re module for regex
-- Basic builtins: len, str, int, list, dict, range, enumerate, zip, sorted, min, max, sum, print
+The variable `context` contains the document ({context_size:,} characters). Write code to explore it.
 
-NOTE: Variables you define PERSIST between iterations. You can build up state across multiple code blocks.
-
-STRATEGY FOR LARGE DOCUMENTS (>100k chars):
-1. First, understand the structure (find chapters/sections)
-2. Split into chunks and use recursive_llm() on each chunk
-3. Aggregate results
-
-EXAMPLE - Processing by chapter:
+EXAMPLE RESPONSE FORMAT:
 ```python
-# Find chapter boundaries (this variable persists!)
-chapters = re.split(r'(# Chapter \\d+[^#]*)', context)
-print(f"Found {{len(chapters)}} chunks")
+print(context[:500])  # See first 500 chars
 ```
 
-Then in next iteration:
-```python
-# Process each chapter (chapters still exists from before)
-results = []
-for i, chapter in enumerate(chapters[:3]):
-    if len(chapter) > 100:
-        result = recursive_llm("Find age mentions in this text", chapter)
-        results.append(f"Chunk {{i}}: {{result}}")
-        print(results[-1])
-```
+AVAILABLE (already imported, do NOT use import statements):
+- context: str - the document to analyze
+- re: regex module (use re.findall, re.search directly)
+- print, len, str, int, list, dict, range, enumerate, zip, sorted, min, max, sum
 
-IMPORTANT:
-- For documents > 100k chars, ALWAYS use recursive_llm() on chunks
-- Write code FIRST, see output, THEN conclude
-- Use FINAL("answer") only after you have evidence
-- For multi-line answers use FINAL('''answer''')"""
+When you have your final answer, write: FINAL("your answer here")
+
+DO NOT use import statements. DO NOT ask questions. Just write Python code in a ```python block."""
 
 
 def extract_code(response: str) -> Optional[str]:
