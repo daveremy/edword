@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Optional
 
 from .base import BasePass, Finding, PassResult, Severity
 from ..config import EdwordConfig, get_pass_config
+from ..index.schema import AccumulatedIndex
 
 __all__ = ["BasePass", "Finding", "PassResult", "Severity", "run_passes", "get_pass"]
 
@@ -33,6 +34,7 @@ def run_passes(
     codex: Optional[str] = None,
     config: Optional[EdwordConfig] = None,
     verbose: bool = False,
+    index: Optional[AccumulatedIndex] = None,
 ) -> List[PassResult]:
     """
     Run multiple analysis passes.
@@ -43,6 +45,7 @@ def run_passes(
         codex: Optional compiled codex text
         config: Edword configuration
         verbose: Show verbose output
+        index: Optional accumulated index for index-based passes
 
     Returns:
         List of PassResult objects
@@ -77,6 +80,7 @@ def run_passes(
                 codex=codex,
                 config=config,
                 verbose=verbose,
+                index=index,
             )
             results.append(result)
 
@@ -101,5 +105,15 @@ except ImportError:
 
 try:
     from . import character_codex
+except ImportError:
+    pass  # Pass not yet implemented
+
+try:
+    from . import continuity_index
+except ImportError:
+    pass  # Pass not yet implemented
+
+try:
+    from . import codex_validation_index
 except ImportError:
     pass  # Pass not yet implemented

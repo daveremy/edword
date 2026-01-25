@@ -21,6 +21,14 @@ app = typer.Typer(
 )
 console = Console()
 
+# Index subcommand group
+index_app = typer.Typer(help="Build and manage chapter indices.")
+app.add_typer(index_app, name="index")
+
+# Query subcommand group
+query_app = typer.Typer(help="Query the manuscript index.")
+app.add_typer(query_app, name="query")
+
 
 def get_config_and_project(
     config_path: Optional[Path] = None
@@ -174,6 +182,9 @@ def analyze(
     no_codex: bool = typer.Option(
         False, "--no-codex", help="Skip loading codex (faster for large codex)"
     ),
+    use_index: bool = typer.Option(
+        False, "--index", "-i", help="Use accumulated index for analysis (faster, requires 'edword index build' first)"
+    ),
     save: bool = typer.Option(
         False, "--save", "-s", help="Save report to file"
     ),
@@ -254,6 +265,17 @@ def analyze(
     elif no_codex:
         console.print(f"[dim]Codex: skipped (--no-codex)[/dim]")
 
+    # Load accumulated index if requested
+    accumulated_index = None
+    if use_index:
+        from .index.storage import IndexStorage
+        storage = IndexStorage(config.project_root, str(config.paths.index))
+        accumulated_index = storage.load_accumulated_index(selected_book.name)
+        if accumulated_index:
+            console.print(f"[dim]Index: {len(accumulated_index.characters)} characters, {len(accumulated_index.timeline)} events[/dim]")
+        else:
+            console.print(f"[yellow]Warning:[/yellow] No index found for {selected_book.name}. Run 'edword index build' first.")
+
     # Determine which passes to run
     if pass_names:
         passes_to_run = pass_names
@@ -276,6 +298,7 @@ def analyze(
         codex=codex,
         config=config,
         verbose=verbose,
+        index=accumulated_index,
     )
 
     # Display results
@@ -413,6 +436,369 @@ def report(
     else:
         console.print(f"[red]Error:[/red] Unknown action: {action}")
         raise typer.Exit(1)
+
+
+# --- Index Commands ---
+
+@index_app.command("build")
+def index_build(
+    book: Optional[str] = typer.Option(
+        None, "--book", "-b", help="Book to index (e.g., 'book1')"
+    ),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Rebuild even if cached"
+    ),
+    verbose: bool = typer.Option(
+        False, "--verbose", "-v", help="Show verbose output"
+    ),
+    workers: int = typer.Option(
+        1, "--workers", "-w", help="Number of parallel workers (1=sequential)"
+    ),
+    config_path: Optional[Path] = typer.Option(
+        None, "--config", "-c", help="Path to config file"
+    ),
+):
+    """Build chapter index for a book."""
+    import concurrent.futures
+    from .index import (
+        IndexStorage, Accumulator, ExtractionConfig,
+        extract_chapter, EntityList
+    )
+
+    config, project = get_config_and_project(config_path)
+
+    if not project.has_manuscripts:
+        console.print("[red]Error:[/red] No manuscripts directory found")
+        raise typer.Exit(1)
+
+    if not project.books:
+        console.print("[red]Error:[/red] No books found")
+        raise typer.Exit(1)
+
+    # Select book
+    if book:
+        selected_book = get_book_by_name(project, book)
+        if not selected_book:
+            console.print(f"[red]Error:[/red] Book '{book}' not found")
+            console.print(f"Available: {', '.join(b.name for b in project.books)}")
+            raise typer.Exit(1)
+    else:
+        selected_book = project.books[0]
+
+    # Initialize storage and accumulator
+    storage = IndexStorage(config.project_root)
+    accumulator = Accumulator(selected_book.name)
+
+    # Get extraction config from edword config
+    extraction_config = ExtractionConfig(
+        provider=config.llm.provider,
+        model=config.llm.model,  # TODO: Use index-specific model when config supports it
+        max_retries=3,
+        verbose=verbose,
+    )
+
+    parallel_info = f" (parallel: {workers} workers)" if workers > 1 else ""
+    console.print(Panel(
+        f"[bold]{config.project_name}[/bold]\n"
+        f"Book: {selected_book.name}\n"
+        f"Chapters: {selected_book.chapter_count}{parallel_info}",
+        title="Building Index",
+        border_style="blue",
+    ))
+
+    # Process each chapter
+    chapters_indexed = 0
+    chapters_skipped = 0
+    errors = []
+
+    # First pass: identify which chapters need extraction
+    chapters_to_extract = []  # [(index, chapter_id, chapter_path), ...]
+    chapters_to_load = []     # [(index, chapter_id), ...]
+
+    for i, chapter_path in enumerate(selected_book.chapters):
+        chapter_id = chapter_path.stem
+        if not force and not storage.needs_reindex(selected_book.name, chapter_id, chapter_path):
+            chapters_to_load.append((i, chapter_id))
+        else:
+            chapters_to_extract.append((i, chapter_id, chapter_path))
+
+    if chapters_to_load:
+        console.print(f"[dim]Skipping {len(chapters_to_load)} cached chapters[/dim]")
+
+    # Results storage: index -> ExtractionResult or loaded ChapterIndex
+    results: dict = {}
+
+    # Load cached chapters
+    for i, chapter_id in chapters_to_load:
+        existing = storage.load_chapter_index(selected_book.name, chapter_id)
+        if existing:
+            results[i] = ("loaded", existing)
+            chapters_skipped += 1
+
+    if not chapters_to_extract:
+        console.print("[dim]All chapters already indexed[/dim]")
+    elif workers > 1 and len(chapters_to_extract) > 1:
+        # Parallel extraction
+        console.print(f"[cyan]Extracting {len(chapters_to_extract)} chapters with {workers} workers...[/cyan]")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
+            # Submit all extraction tasks
+            futures = {}
+            for i, chapter_id, chapter_path in chapters_to_extract:
+                future = executor.submit(
+                    extract_chapter,
+                    chapter_path=chapter_path,
+                    book_id=selected_book.name,
+                    chapter_id=chapter_id,
+                    entity_list=None,  # No entity list in parallel mode
+                    config=extraction_config,
+                )
+                futures[future] = (i, chapter_id, chapter_path)
+
+            # Process results as they complete
+            for future in concurrent.futures.as_completed(futures):
+                i, chapter_id, chapter_path = futures[future]
+                try:
+                    result = future.result()
+                    results[i] = ("extracted", result)
+
+                    # Show progress
+                    if result.success:
+                        if result.timing:
+                            t = result.timing
+                            retries_info = f" [yellow]({result.retries_used} retries)[/yellow]" if result.retries_used > 0 else ""
+                            console.print(
+                                f"  [green]✓[/green] {chapter_id}: "
+                                f"[dim]{t.total_ms/1000:.1f}s[/dim] "
+                                f"([cyan]{t.llm_calls_ms/1000:.1f}s[/cyan] LLM × {t.llm_call_count})"
+                                f"{retries_info}"
+                            )
+                    else:
+                        if result.timing:
+                            console.print(
+                                f"  [red]✗[/red] {chapter_id}: {result.error} "
+                                f"[dim]({result.timing.total_ms/1000:.1f}s)[/dim]"
+                            )
+                        else:
+                            console.print(f"  [red]✗[/red] {chapter_id}: {result.error}")
+                except Exception as e:
+                    console.print(f"  [red]✗[/red] {chapter_id}: Exception: {e}")
+                    results[i] = ("error", str(e))
+    else:
+        # Sequential extraction (original behavior)
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+        ) as progress:
+            for i, chapter_id, chapter_path in chapters_to_extract:
+                task = progress.add_task(
+                    f"Indexing {chapter_id}... ({i+1}/{selected_book.chapter_count})",
+                    total=None
+                )
+
+                # Get entity list from accumulated so far (sequential mode only)
+                entity_list = accumulator.get_entity_list()
+
+                result = extract_chapter(
+                    chapter_path=chapter_path,
+                    book_id=selected_book.name,
+                    chapter_id=chapter_id,
+                    entity_list=entity_list if entity_list.characters else None,
+                    config=extraction_config,
+                )
+
+                progress.remove_task(task)
+                results[i] = ("extracted", result)
+
+                if result.success:
+                    if result.timing:
+                        t = result.timing
+                        retries_info = f" [yellow]({result.retries_used} retries)[/yellow]" if result.retries_used > 0 else ""
+                        console.print(
+                            f"  [green]✓[/green] {chapter_id}: "
+                            f"[dim]{t.total_ms/1000:.1f}s[/dim] "
+                            f"([cyan]{t.llm_calls_ms/1000:.1f}s[/cyan] LLM × {t.llm_call_count})"
+                            f"{retries_info}"
+                        )
+                else:
+                    if result.timing:
+                        console.print(
+                            f"  [red]✗[/red] {chapter_id}: {result.error} "
+                            f"[dim]({result.timing.total_ms/1000:.1f}s)[/dim]"
+                        )
+                    else:
+                        console.print(f"  [red]✗[/red] {chapter_id}: {result.error}")
+
+    # Accumulate all results in chapter order
+    for i in range(len(selected_book.chapters)):
+        if i not in results:
+            continue
+
+        status, data = results[i]
+        chapter_id = selected_book.chapters[i].stem
+
+        if status == "loaded":
+            # Already loaded from cache
+            accumulator.add_chapter(data)
+        elif status == "extracted":
+            result = data
+            if result.success:
+                storage.save_chapter_index(result.index)
+                contradictions = accumulator.add_chapter(result.index)
+                chapters_indexed += 1
+                if contradictions and verbose:
+                    for c in contradictions:
+                        console.print(f"  [yellow]Contradiction ({chapter_id}):[/yellow] {c.message}")
+            else:
+                errors.append((chapter_id, result.error))
+        elif status == "error":
+            errors.append((chapter_id, data))
+
+    # Save accumulated index
+    acc_result = accumulator.get_result()
+    storage.save_accumulated_index(acc_result.index)
+
+    # Summary
+    console.print()
+    if errors:
+        console.print(Panel(
+            f"[green]{chapters_indexed}[/green] indexed  "
+            f"[dim]{chapters_skipped}[/dim] skipped  "
+            f"[red]{len(errors)}[/red] errors\n"
+            f"[yellow]{len(acc_result.contradictions)}[/yellow] contradictions detected",
+            title="Index Build Complete",
+            border_style="yellow",
+        ))
+    else:
+        console.print(Panel(
+            f"[green]{chapters_indexed}[/green] indexed  "
+            f"[dim]{chapters_skipped}[/dim] skipped\n"
+            f"[yellow]{len(acc_result.contradictions)}[/yellow] contradictions detected",
+            title="Index Build Complete",
+            border_style="green",
+        ))
+
+
+@index_app.command("show")
+def index_show(
+    book: Optional[str] = typer.Option(
+        None, "--book", "-b", help="Book to show"
+    ),
+    chapter: Optional[str] = typer.Option(
+        None, "--chapter", "-ch", help="Specific chapter to show"
+    ),
+    config_path: Optional[Path] = typer.Option(
+        None, "--config", "-c", help="Path to config file"
+    ),
+):
+    """Show index summary or details."""
+    from .index import IndexStorage
+
+    config, project = get_config_and_project(config_path)
+    storage = IndexStorage(config.project_root)
+
+    # Get stats
+    stats = storage.get_stats(book)
+
+    if not stats["books"]:
+        console.print("[dim]No indices found. Run 'edword index build' first.[/dim]")
+        return
+
+    if chapter:
+        # Show specific chapter
+        book_id = book or (stats["books"][0]["book_id"] if stats["books"] else None)
+        if not book_id:
+            console.print("[red]Error:[/red] Specify --book")
+            raise typer.Exit(1)
+
+        index = storage.load_chapter_index(book_id, chapter)
+        if not index:
+            console.print(f"[red]Error:[/red] Chapter '{chapter}' not found in index")
+            raise typer.Exit(1)
+
+        # Show chapter details
+        console.print(Panel(
+            f"[bold]{book_id} / {chapter}[/bold]\n"
+            f"Source: {index.source_path}\n"
+            f"Extracted: {index.extracted_at}",
+            title="Chapter Index",
+            border_style="blue",
+        ))
+
+        console.print(f"\n[bold]Characters:[/bold] {len(index.characters)}")
+        for char in index.characters[:5]:  # Show first 5
+            console.print(f"  - {char.canonical_name} ({char.id}): {len(char.facts)} facts")
+
+        console.print(f"\n[bold]Timeline Events:[/bold] {len(index.timeline)}")
+        for event in index.timeline[:5]:
+            console.print(f"  - {event.event[:60]}...")
+
+        console.print(f"\n[bold]Locations:[/bold] {len(index.locations)}")
+        for loc in index.locations[:5]:
+            console.print(f"  - {loc.name} ({loc.id})")
+
+        console.print(f"\n[bold]Other:[/bold]")
+        console.print(f"  Artifacts: {len(index.artifacts)}")
+        console.print(f"  World Facts: {len(index.world_facts)}")
+        console.print(f"  Terminology: {len(index.terminology)}")
+        console.print(f"  Narrative Elements: {len(index.narrative)}")
+
+    else:
+        # Show summary
+        table = Table(title="Index Summary")
+        table.add_column("Book", style="cyan")
+        table.add_column("Chapters", justify="right")
+        table.add_column("Accumulated", justify="center")
+        table.add_column("Size")
+
+        for book_stats in stats["books"]:
+            table.add_row(
+                book_stats["book_id"],
+                str(len(book_stats["chapters"])),
+                "[green]Yes[/green]" if book_stats["has_accumulated"] else "[dim]No[/dim]",
+                f"{book_stats['size_bytes'] / 1024:.1f}KB",
+            )
+
+        console.print(table)
+        console.print(f"\n[dim]Total: {stats['total_chapters']} chapters, {stats['total_size_bytes'] / 1024:.1f}KB[/dim]")
+
+
+@index_app.command("clear")
+def index_clear(
+    book: Optional[str] = typer.Option(
+        None, "--book", "-b", help="Book to clear (all if not specified)"
+    ),
+    force: bool = typer.Option(
+        False, "--force", "-f", help="Skip confirmation"
+    ),
+    config_path: Optional[Path] = typer.Option(
+        None, "--config", "-c", help="Path to config file"
+    ),
+):
+    """Clear index files."""
+    from .index import IndexStorage
+
+    config, _ = get_config_and_project(config_path)
+    storage = IndexStorage(config.project_root)
+
+    if book:
+        target = f"book '{book}'"
+    else:
+        target = "all books"
+
+    if not force:
+        confirm = typer.confirm(f"Clear index for {target}?")
+        if not confirm:
+            console.print("[dim]Cancelled[/dim]")
+            return
+
+    if book:
+        count = storage.clear_book(book)
+    else:
+        count = storage.clear_all()
+
+    console.print(f"[green]Cleared {count} index files[/green]")
 
 
 def main():

@@ -24,6 +24,7 @@ class PathsConfig:
     manuscripts: str = "manuscripts/"
     codex: str = "codex/"
     reports: str = ".edword/reports/"
+    index: str = ".edword/index/"
 
 
 @dataclass
@@ -114,6 +115,7 @@ def load_config(config_path: Optional[Path] = None) -> EdwordConfig:
             manuscripts=paths.get("manuscripts", config.paths.manuscripts),
             codex=paths.get("codex", config.paths.codex),
             reports=paths.get("reports", config.paths.reports),
+            index=paths.get("index", config.paths.index),
         )
 
     # LLM settings

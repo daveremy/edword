@@ -151,7 +151,7 @@ def call_gemini(
 
     Args:
         prompt: The prompt to send
-        model: Model name (currently unused - Gemini CLI uses default model)
+        model: Model name - "flash", "pro", or full model ID
         system_prompt: Optional system prompt (prepended to prompt)
         timeout: Timeout in seconds
         use_cache: Whether to use cached responses
@@ -161,10 +161,6 @@ def call_gemini(
 
     Raises:
         ProviderError: If CLI not found or call fails
-
-    Note:
-        The Gemini CLI doesn't currently support model selection via command line.
-        The model parameter is accepted for API consistency but not used.
     """
     # Build full prompt with system prompt if provided
     full_prompt = prompt
@@ -181,6 +177,11 @@ def call_gemini(
     if not shutil.which("gemini"):
         raise ProviderError("gemini CLI not found")
 
+    # Build base command with model if specified
+    base_cmd = ["gemini", "-y"]
+    if model and model != "default":
+        base_cmd.extend(["-m", model])
+
     try:
         # For large prompts, use a temp file to avoid ARG_MAX
         # Gemini CLI doesn't support stdin well, so we use -p with file or short prompts
@@ -194,7 +195,7 @@ def call_gemini(
                 # Try using the prompt file - gemini may support @file syntax
                 # If not, this will still work but with truncation risk
                 result = subprocess.run(
-                    ["gemini", "-y", "-p", f"@{temp_path}"],
+                    base_cmd + ["-p", f"@{temp_path}"],
                     capture_output=True,
                     text=True,
                     timeout=timeout,
@@ -203,7 +204,7 @@ def call_gemini(
                 Path(temp_path).unlink(missing_ok=True)
         else:
             result = subprocess.run(
-                ["gemini", "-y", "-p", full_prompt],
+                base_cmd + ["-p", full_prompt],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
