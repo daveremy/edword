@@ -801,6 +801,341 @@ def index_clear(
     console.print(f"[green]Cleared {count} index files[/green]")
 
 
+# --- Query Commands ---
+
+
+@query_app.command("character")
+def query_character_cmd(
+    name: str = typer.Argument(..., help="Character name to look up"),
+    book: Optional[str] = typer.Option(None, "--book", "-b", help="Book name"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    config_path: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Look up character facts, relationships, and appearances."""
+    from .query import query_character, QueryError
+    import json
+
+    config, _ = get_config_and_project(config_path)
+
+    try:
+        result = query_character(config.project_root, name, book)
+    except QueryError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    if json_output:
+        console.print(json.dumps(result, indent=2, default=str))
+        return
+
+    # Human-readable output
+    if not result["found"]:
+        if "matches" in result and result["matches"]:
+            console.print(f"[yellow]Character '{name}' not found. Did you mean:[/yellow]")
+            for match in result["matches"]:
+                console.print(f"  - {match['canonical_name']} ({match['id']})")
+        else:
+            console.print(f"[yellow]Character '{name}' not found[/yellow]")
+        return
+
+    char = result["character"]
+    console.print(f"\n[bold]{char['canonical_name']}[/bold] ({char['id']})")
+    console.print("━" * 40)
+
+    mentions = char.get("mentions", [])
+    if mentions:
+        console.print(f"\nAlso known as: {', '.join(mentions[:10])}")
+        if len(mentions) > 10:
+            console.print(f"  [dim]... and {len(mentions) - 10} more[/dim]")
+
+    facts = char.get("facts", [])
+    if facts:
+        console.print("\n[bold]Facts:[/bold]")
+        for fact in facts[:15]:
+            conf = f" ({fact['confidence']})" if fact.get("confidence") != "high" else ""
+            console.print(f"  {fact['predicate']}: {fact['value']}{conf}")
+        if len(facts) > 15:
+            console.print(f"  [dim]... and {len(facts) - 15} more[/dim]")
+
+    relationships = char.get("relationships", [])
+    if relationships:
+        console.print("\n[bold]Relationships:[/bold]")
+        for rel in relationships[:10]:
+            status = f" ({rel['status']})" if rel.get("status") != "active" else ""
+            console.print(f"  {rel['type']} → {rel['to_id']}{status}")
+        if len(relationships) > 10:
+            console.print(f"  [dim]... and {len(relationships) - 10} more[/dim]")
+
+
+@query_app.command("timeline")
+def query_timeline_cmd(
+    book: Optional[str] = typer.Option(None, "--book", "-b", help="Book name"),
+    chapters: Optional[str] = typer.Option(None, "--chapters", "-ch", help="Chapter range e.g. '1-5'"),
+    limit: Optional[int] = typer.Option(None, "--limit", "-l", help="Limit number of events"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    config_path: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Get timeline events."""
+    from .query import query_timeline, QueryError
+    import json
+
+    config, _ = get_config_and_project(config_path)
+
+    try:
+        result = query_timeline(config.project_root, book, chapters, limit)
+    except (QueryError, ValueError) as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    if json_output:
+        console.print(json.dumps(result, indent=2, default=str))
+        return
+
+    # Human-readable output
+    console.print(f"\n[bold]Timeline[/bold] ({result['total_events']} events)")
+    console.print("━" * 40)
+
+    if not result["events"]:
+        console.print("[dim]No events found[/dim]")
+        return
+
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Event", style="dim", width=50)
+    table.add_column("Time Ref", width=20)
+
+    for evt in result["events"][:25]:
+        event_text = evt.get("event", "")[:50]
+        time_ref = evt.get("time_ref", "") or ""
+        table.add_row(event_text, time_ref)
+
+    console.print(table)
+
+    if result["total_events"] > 25:
+        console.print(f"\n[dim]... and {result['total_events'] - 25} more events[/dim]")
+
+
+@query_app.command("location")
+def query_location_cmd(
+    name: str = typer.Argument(..., help="Location name to look up"),
+    book: Optional[str] = typer.Option(None, "--book", "-b", help="Book name"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    config_path: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Look up location details."""
+    from .query import query_location, QueryError
+    import json
+
+    config, _ = get_config_and_project(config_path)
+
+    try:
+        result = query_location(config.project_root, name, book)
+    except QueryError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    if json_output:
+        console.print(json.dumps(result, indent=2, default=str))
+        return
+
+    # Human-readable output
+    if not result["found"]:
+        if "matches" in result and result["matches"]:
+            console.print(f"[yellow]Location '{name}' not found. Did you mean:[/yellow]")
+            for match in result["matches"]:
+                console.print(f"  - {match['name']} ({match['id']})")
+        else:
+            console.print(f"[yellow]Location '{name}' not found[/yellow]")
+        return
+
+    loc = result["location"]
+    console.print(f"\n[bold]{loc['name']}[/bold] ({loc['id']})")
+    console.print("━" * 40)
+
+    if loc.get("description"):
+        console.print(f"\n{loc['description']}")
+
+    if loc.get("characters_present"):
+        console.print(f"\nCharacters present: {', '.join(loc['characters_present'])}")
+
+    if loc.get("significance"):
+        console.print(f"\nSignificance: {loc['significance']}")
+
+
+@query_app.command("artifact")
+def query_artifact_cmd(
+    name: str = typer.Argument(..., help="Artifact/item name to look up"),
+    book: Optional[str] = typer.Option(None, "--book", "-b", help="Book name"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    config_path: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Look up significant items/artifacts."""
+    from .query import query_artifact, QueryError
+    import json
+
+    config, _ = get_config_and_project(config_path)
+
+    try:
+        result = query_artifact(config.project_root, name, book)
+    except QueryError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    if json_output:
+        console.print(json.dumps(result, indent=2, default=str))
+        return
+
+    # Human-readable output
+    if not result["found"]:
+        if "matches" in result and result["matches"]:
+            console.print(f"[yellow]Artifact '{name}' not found. Did you mean:[/yellow]")
+            for match in result["matches"]:
+                console.print(f"  - {match['name']} ({match['id']})")
+        else:
+            console.print(f"[yellow]Artifact '{name}' not found[/yellow]")
+        return
+
+    artifact = result["artifact"]
+    console.print(f"\n[bold]{artifact['name']}[/bold] ({artifact['id']})")
+    console.print("━" * 40)
+
+    if artifact.get("status"):
+        console.print(f"\nStatus: {artifact['status']}")
+
+    if artifact.get("holder"):
+        console.print(f"Holder: {artifact['holder']}")
+
+
+@query_app.command("world")
+def query_world_cmd(
+    term: str = typer.Argument(..., help="World term or concept to look up"),
+    book: Optional[str] = typer.Option(None, "--book", "-b", help="Book name"),
+    as_of: Optional[str] = typer.Option(None, "--as-of", help="Show state as of chapter (e.g., '5' or 'chapter-05')"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    config_path: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Look up world-building facts and terminology."""
+    from .query import query_world, QueryError
+    import json
+
+    config, _ = get_config_and_project(config_path)
+
+    try:
+        result = query_world(config.project_root, term, book, as_of)
+    except QueryError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    if json_output:
+        console.print(json.dumps(result, indent=2, default=str))
+        return
+
+    # Human-readable output
+    header = f"\n[bold]World: '{term}'[/bold] ({result['total_matches']} matches)"
+    if result.get("as_of_chapter"):
+        header += f" [dim](as of chapter {result['as_of_chapter']})[/dim]"
+    console.print(header)
+    console.print("━" * 40)
+
+    if not result["found"]:
+        console.print("[dim]No matches found[/dim]")
+        return
+
+    if result.get("terminology"):
+        console.print("\n[bold]Terminology:[/bold]")
+        for t in result["terminology"]:
+            chapter_info = f" [dim](ch {t['chapter']})[/dim]" if t.get("chapter") else ""
+            console.print(f"  [cyan]{t['term']}[/cyan]: {t['definition']}{chapter_info}")
+
+    if result.get("world_facts"):
+        console.print("\n[bold]World Facts:[/bold]")
+        for f in result["world_facts"]:
+            category = f.get("category", "other")
+            chapter_info = f" [dim](ch {f['chapter']})[/dim]" if f.get("chapter") else ""
+            console.print(f"  [{category}] {f['fact']}{chapter_info}")
+
+
+@query_app.command("search")
+def query_search_cmd(
+    query: str = typer.Argument(..., help="Search query"),
+    book: Optional[str] = typer.Option(None, "--book", "-b", help="Book name"),
+    limit: Optional[int] = typer.Option(None, "--limit", "-l", help="Limit results per dimension"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    config_path: Optional[Path] = typer.Option(None, "--config", "-c", help="Path to config file"),
+):
+    """Search across all index dimensions."""
+    from .query import query_search, QueryError
+    import json
+
+    config, _ = get_config_and_project(config_path)
+
+    try:
+        result = query_search(config.project_root, query, book, limit)
+    except QueryError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    if json_output:
+        console.print(json.dumps(result, indent=2, default=str))
+        return
+
+    # Human-readable output
+    console.print(f"\n[bold]Search: '{query}'[/bold] ({result['total_matches']} matches)")
+    console.print("━" * 40)
+
+    if result["total_matches"] == 0:
+        console.print("[dim]No matches found[/dim]")
+        return
+
+    display_limit = 5
+
+    chars = result.get("characters", [])
+    if chars:
+        console.print("\n[bold]Characters:[/bold]")
+        for c in chars[:display_limit]:
+            console.print(f"  - {c['canonical_name']}")
+        if len(chars) > display_limit:
+            console.print(f"  [dim]... and {len(chars) - display_limit} more[/dim]")
+
+    locs = result.get("locations", [])
+    if locs:
+        console.print("\n[bold]Locations:[/bold]")
+        for loc in locs[:display_limit]:
+            console.print(f"  - {loc['name']}")
+        if len(locs) > display_limit:
+            console.print(f"  [dim]... and {len(locs) - display_limit} more[/dim]")
+
+    events = result.get("events", [])
+    if events:
+        console.print("\n[bold]Events:[/bold]")
+        for evt in events[:display_limit]:
+            console.print(f"  - {evt['event'][:60]}...")
+        if len(events) > display_limit:
+            console.print(f"  [dim]... and {len(events) - display_limit} more[/dim]")
+
+    artifacts = result.get("artifacts", [])
+    if artifacts:
+        console.print("\n[bold]Artifacts:[/bold]")
+        for a in artifacts[:display_limit]:
+            console.print(f"  - {a['name']}")
+        if len(artifacts) > display_limit:
+            console.print(f"  [dim]... and {len(artifacts) - display_limit} more[/dim]")
+
+    terms = result.get("terminology", [])
+    if terms:
+        console.print("\n[bold]Terminology:[/bold]")
+        for t in terms[:display_limit]:
+            console.print(f"  - {t['term']}")
+        if len(terms) > display_limit:
+            console.print(f"  [dim]... and {len(terms) - display_limit} more[/dim]")
+
+    facts = result.get("world_facts", [])
+    if facts:
+        console.print("\n[bold]World Facts:[/bold]")
+        for f in facts[:display_limit]:
+            console.print(f"  - {f['fact'][:60]}...")
+        if len(facts) > display_limit:
+            console.print(f"  [dim]... and {len(facts) - display_limit} more[/dim]")
+
+
 def main():
     """Entry point."""
     app()

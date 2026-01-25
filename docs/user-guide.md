@@ -81,12 +81,90 @@ If your AI has access to the terminal, it might run:
 # Quick check of index status
 edword index show
 
-# Query specific character
-edword ask "What do we know about Maya?"
+# Query specific character (returns JSON for AI parsing)
+edword query character "Maya" --json
+
+# Query timeline events
+edword query timeline --json
+
+# Search across everything
+edword query search "neural interface" --json
 
 # Check a specific chapter
 edword analyze --chapters 5 --index
 ```
+
+---
+
+## Query Commands
+
+Query commands let you (or your AI) look up facts from the index. All support `--json` for structured output.
+
+### Query a Character
+
+```bash
+# Basic usage
+edword query character "Greg Walsh"
+
+# JSON output for AI consumption
+edword query character "Greg Walsh" --json
+
+# Search by alias
+edword query character "Dr. Walsh" --json
+```
+
+Returns: canonical name, facts, relationships, appearances, state changes.
+
+### Query Timeline
+
+```bash
+# All events
+edword query timeline --json
+
+# Filter by chapter range
+edword query timeline --chapters "1-5" --json
+
+# Limit results
+edword query timeline --limit 10 --json
+```
+
+Returns: events with time references and ordering constraints.
+
+### Query Location
+
+```bash
+edword query location "Cascade Labs" --json
+```
+
+Returns: location details, characters present, description.
+
+### Query Artifact
+
+```bash
+edword query artifact "Neural Headset" --json
+```
+
+Returns: artifact status, holder, evidence.
+
+### Query World/Terminology
+
+```bash
+# All matching entries
+edword query world "Myriad" --json
+
+# Filter by chapter (show state as of chapter 5)
+edword query world "Myriad" --as-of 5 --json
+```
+
+Returns: matching world facts and terminology definitions, with chapter provenance. Use `--as-of` to see the world state at a specific point in the story.
+
+### Search Across Everything
+
+```bash
+edword query search "neural interface" --json
+```
+
+Searches characters, locations, events, artifacts, world facts, and terminology. Returns matches from each dimension.
 
 ---
 

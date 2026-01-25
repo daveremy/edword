@@ -27,22 +27,28 @@ AI-powered editorial memory for long-form fiction. The author never leaves their
 
 ## Development Phases
 
-### Phase 1: Query Commands (Current Priority)
+### Phase 1: Query Commands (COMPLETE)
 Add structured query commands for AI assistants to retrieve indexed data.
 
 ```bash
 edword query character "Greg Walsh" --json
 edword query timeline --book book1 --json
 edword query location "the lab" --json
+edword query artifact "Neural Headset" --json
+edword query world "Myriad" --json
 edword query search "neural interface" --json
 ```
 
 **Tasks:**
-- [ ] Implement `query character` - return facts, relationships, appearances
-- [ ] Implement `query timeline` - return events with ordering
-- [ ] Implement `query location` - return location details
-- [ ] Implement `query search` - free-text search across index
-- [ ] Add `--json` flag to all query commands
+- [x] Implement `query character` - return facts, relationships, appearances
+- [x] Implement `query timeline` - return events with ordering
+- [x] Implement `query location` - return location details
+- [x] Implement `query artifact` - return artifact/item details
+- [x] Implement `query world` - search world facts and terminology
+- [x] Implement `query search` - free-text search across index
+- [x] Add `--json` flag to all query commands
+- [x] Add unit tests (52 tests passing)
+- [x] Update user-guide.md documentation
 
 ### Phase 2: Check Command
 Real-time consistency checking for new text.

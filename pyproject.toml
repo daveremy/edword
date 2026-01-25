@@ -41,3 +41,8 @@ edword = "edword.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["edword"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
