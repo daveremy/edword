@@ -74,15 +74,23 @@ Add `--json` flag to all commands for AI consumption.
 - [x] `edword analyze --json`
 - [x] `edword info --json`
 
-### Phase 4: MCP Server (Optional)
-For AI assistants with MCP support (faster than CLI).
+### Phase 4: MCP Server
+**Priority integration for AI writing assistants.** MCP provides seamless tool access - the AI calls `query_character("Greg")` directly instead of spawning shell commands and parsing JSON.
+
+CLI remains valuable for manual usage, scripting, and AI assistants without MCP support. But MCP is how the assistant *should* interact during a writing session.
 
 ```python
 @mcp.tool()
-def query_character(name: str) -> dict: ...
+def query_character(name: str, book: str = None) -> dict: ...
 
 @mcp.tool()
-def check_text(text: str) -> dict: ...
+def query_timeline(book: str = None, chapters: str = None) -> dict: ...
+
+@mcp.tool()
+def check_text(text: str, book: str = None) -> dict: ...
+
+@mcp.tool()
+def index_status(book: str = None) -> dict: ...
 ```
 
 **Tasks:**
@@ -90,6 +98,7 @@ def check_text(text: str) -> dict: ...
 - [ ] Implement MCP tools that call same core logic as CLI
 - [ ] Add `edword mcp serve` command
 - [ ] Document MCP setup for Claude Code
+- [ ] Add to trilogy's `.claude/settings.local.json`
 
 ### Phase 5: CoVe Verification
 Chain-of-Verification for high-severity findings.
