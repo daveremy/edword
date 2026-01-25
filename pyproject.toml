@@ -35,6 +35,9 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
 ]
+fuzzy = [
+    "rapidfuzz>=3.0.0",
+]
 
 [project.scripts]
 edword = "edword.cli:app"

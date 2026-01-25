@@ -17,11 +17,9 @@ AI-powered editorial memory for long-form fiction. The author never leaves their
 - **LLM Providers**: Claude CLI, Gemini CLI support
 
 ### Not Yet Implemented
-- Query commands (`edword query character`, `edword query timeline`)
-- Check command (`edword check` for real-time consistency)
-- `--json` flag for AI consumption
 - MCP server for AI assistant integration
 - CoVe verification for high-severity findings
+- `--json` flag for remaining commands (index status, analyze, info)
 
 ---
 
@@ -50,7 +48,7 @@ edword query search "neural interface" --json
 - [x] Add unit tests (52 tests passing)
 - [x] Update user-guide.md documentation
 
-### Phase 2: Check Command
+### Phase 2: Check Command (COMPLETE)
 Real-time consistency checking for new text.
 
 ```bash
@@ -59,9 +57,13 @@ echo "Greg's blue eyes sparkled" | edword check --json
 ```
 
 **Tasks:**
-- [ ] Implement `edword check` - compare text against index
-- [ ] Support stdin and argument input
-- [ ] Return structured conflicts with evidence
+- [x] Implement `edword check` - compare text against index
+- [x] Support stdin and argument input
+- [x] Return structured conflicts with evidence
+- [x] Proximity-based negation detection (avoids false positives)
+- [x] Single-pass O(N) character mention finding
+- [x] Add unit tests (88 tests in test_check.py)
+- [x] Create shared `common.py` module for code reuse
 
 ### Phase 3: JSON Output Everywhere
 Add `--json` flag to all commands for AI consumption.
@@ -140,6 +142,9 @@ edword analyze --index
 | File | Purpose |
 |------|---------|
 | `edword/cli.py` | All CLI commands |
+| `edword/common.py` | Shared utilities (load_index, base exceptions) |
+| `edword/query.py` | Query operations (character, timeline, location, etc.) |
+| `edword/check.py` | Real-time consistency checking |
 | `edword/index/` | Index building, storage, accumulation |
 | `edword/passes/` | Analysis passes |
 | `edword/llm/` | LLM provider abstraction |

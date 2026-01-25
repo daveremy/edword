@@ -168,6 +168,19 @@ edword ask "What motivates Greg in chapter 5?"
 edword ask --book book1 --chapter 5 "What happens in this chapter?"
 ```
 
+### Check Command (Real-time Consistency)
+
+```bash
+# Check text for contradictions against the index
+edword check "Greg's blue eyes sparkled"
+
+# Check from stdin (for AI assistants)
+echo "Greg is 35 years old" | edword check --json
+
+# Check a draft file
+cat draft.md | edword check --json
+```
+
 ### Other Commands
 
 ```bash

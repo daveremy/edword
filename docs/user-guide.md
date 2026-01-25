@@ -168,6 +168,64 @@ Searches characters, locations, events, artifacts, world facts, and terminology.
 
 ---
 
+## Check Command
+
+The check command validates new text against indexed facts in real-time. Use it before committing new prose to catch inconsistencies.
+
+### Check Text for Conflicts
+
+```bash
+# Check text argument
+edword check "Greg's blue eyes sparkled"
+
+# Check from stdin (useful for AI assistants)
+echo "Greg is 35 years old" | edword check --json
+
+# Check a file
+cat draft.md | edword check --json
+```
+
+### What It Checks
+
+Currently checks for:
+- **Character ages**: Detects when text states an age that contradicts the index
+- **Physical traits**: Eye color, hair color via possessive patterns ("Greg's blue eyes")
+
+The check command uses high-precision patterns to minimize false positives:
+- Only extracts claims attributed to specific characters (not pronouns)
+- Skips negated claims ("not 35 years old", "formerly had blue eyes")
+- Uses proximity-based negation detection
+
+### Example Output
+
+```bash
+$ echo "Greg is 35 years old" | edword check --json
+{
+  "has_conflicts": true,
+  "conflicts": [
+    {
+      "entity_type": "character",
+      "entity_name": "Greg Walsh",
+      "field": "age",
+      "indexed_value": "45",
+      "text_value": "35",
+      "severity": "error",
+      "confidence": 0.9,
+      "snippet": "Greg is 35 years old",
+      "indexed_evidence": {
+        "quote": "Greg Walsh, 45, stared at the screen",
+        "line": 42,
+        "chapter": "chapter-03"
+      }
+    }
+  ],
+  "characters_checked": 1,
+  "book": "book1"
+}
+```
+
+---
+
 ## Project Structure
 
 Edword expects this layout:

@@ -5,15 +5,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from .discovery import discover_project, get_book_by_name
+from .common import EdwordError, IndexError as CommonIndexError, load_index
 from .index.schema import AccumulatedIndex
-from .index.storage import IndexStorage
 
 MAX_PARTIAL_MATCHES = 10
 
 
-class QueryError(Exception):
+class QueryError(EdwordError):
     """Error during query operation."""
+
     pass
 
 
@@ -40,29 +40,10 @@ def _load_index(project_root: Path, book: Optional[str] = None) -> tuple[Accumul
     Raises:
         QueryError: If no books found, book doesn't exist, or no index
     """
-    project = discover_project(project_root)
-
-    if not project.books:
-        raise QueryError("No books found in project")
-
-    # Determine book_id
-    if book:
-        book_info = get_book_by_name(project, book)
-        if not book_info:
-            available = [b.name for b in project.books]
-            raise QueryError(f"Book '{book}' not found. Available: {available}")
-        book_id = book_info.name
-    else:
-        book_id = project.books[0].name
-
-    # Load index
-    storage = IndexStorage(project_root)
-    index = storage.load_accumulated_index(book_id)
-
-    if index is None:
-        raise QueryError(f"No index for '{book_id}'. Run 'edword index build' first.")
-
-    return index, book_id
+    try:
+        return load_index(project_root, book)
+    except CommonIndexError as e:
+        raise QueryError(str(e)) from e
 
 
 def _normalize(text: str) -> str:

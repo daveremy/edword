@@ -1136,6 +1136,88 @@ def query_search_cmd(
             console.print(f"  [dim]... and {len(facts) - display_limit} more[/dim]")
 
 
+# --- Check Command ---
+
+
+@app.command("check")
+def check_cmd(
+    text: Optional[str] = typer.Argument(
+        None, help="Text to check for consistency (or use stdin)"
+    ),
+    book: Optional[str] = typer.Option(None, "--book", "-b", help="Book name"),
+    json_output: bool = typer.Option(False, "--json", "-j", help="Output as JSON"),
+    config_path: Optional[Path] = typer.Option(
+        None, "--config", "-c", help="Path to config file"
+    ),
+):
+    """Check if text contradicts indexed facts.
+
+    Compares new text against the manuscript index to detect inconsistencies.
+    Useful for verifying that proposed content doesn't contradict established facts.
+
+    Examples:
+        edword check "Greg is 35 years old"
+        echo "Maya's blue eyes sparkled" | edword check --json
+        cat draft.md | edword check --book book1
+    """
+    from .check import check_text, CheckError
+    import json as json_module
+
+    config, _ = get_config_and_project(config_path)
+
+    # Handle stdin if no text argument
+    if text is None:
+        if sys.stdin.isatty():
+            console.print("[red]Error:[/red] Provide text as argument or via stdin")
+            console.print("\n[dim]Usage:[/dim]")
+            console.print("  edword check \"Greg is 35 years old\"")
+            console.print("  echo \"text\" | edword check --json")
+            raise typer.Exit(1)
+        text = sys.stdin.read()
+
+    if not text or not text.strip():
+        console.print("[red]Error:[/red] Text cannot be empty")
+        raise typer.Exit(1)
+
+    try:
+        result = check_text(config.project_root, text, book)
+    except CheckError as e:
+        console.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    if json_output:
+        # Use print() not console.print() for clean JSON (per Codex review)
+        print(json_module.dumps(result, indent=2, default=str))
+        return
+
+    # Human-readable output
+    if result["has_conflicts"]:
+        conflict_count = len(result["conflicts"])
+        console.print(f"\n[red]Found {conflict_count} conflict(s):[/red]")
+        console.print("━" * 40)
+
+        for conflict in result["conflicts"]:
+            severity = conflict["severity"]
+            severity_color = "red" if severity == "error" else "yellow"
+
+            console.print(
+                f"\n[{severity_color}]● {conflict['entity_name']}.{conflict['field']}[/{severity_color}]"
+            )
+            console.print(f"  Index says: [green]{conflict['indexed_value']}[/green]")
+            console.print(f"  Text says:  [red]{conflict['text_value']}[/red]")
+            console.print(f"  [dim]...{conflict['snippet']}[/dim]")
+
+            if conflict.get("indexed_evidence"):
+                evidence = conflict["indexed_evidence"]
+                if evidence.get("chapter"):
+                    console.print(f"  [dim]Source: {evidence['chapter']}[/dim]")
+    else:
+        console.print("\n[green]No conflicts found[/green]")
+        console.print(
+            f"[dim]Checked against {result['characters_checked']} character(s)[/dim]"
+        )
+
+
 def main():
     """Entry point."""
     app()

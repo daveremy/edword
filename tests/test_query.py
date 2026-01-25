@@ -452,7 +452,7 @@ class TestQueryErrors:
             books=[],
             codex_files=[],
         )
-        with patch("edword.query.discover_project", return_value=mock_project):
+        with patch("edword.common.discover_project", return_value=mock_project):
             with pytest.raises(QueryError, match="No books found"):
                 query_character(mock_project_root, "Greg")
 
@@ -467,8 +467,8 @@ class TestQueryErrors:
             books=[BookInfo(name="book1", path=mock_project_root, chapters=[])],
             codex_files=[],
         )
-        with patch("edword.query.discover_project", return_value=mock_project):
-            with patch("edword.query.get_book_by_name", return_value=None):
+        with patch("edword.common.discover_project", return_value=mock_project):
+            with patch("edword.common.get_book_by_name", return_value=None):
                 with pytest.raises(QueryError, match="not found"):
                     query_character(mock_project_root, "Greg", book="nonexistent")
 
@@ -483,9 +483,9 @@ class TestQueryErrors:
             books=[BookInfo(name="book1", path=mock_project_root, chapters=[])],
             codex_files=[],
         )
-        with patch("edword.query.discover_project", return_value=mock_project):
-            with patch("edword.query.get_book_by_name", return_value=mock_project.books[0]):
-                with patch("edword.query.IndexStorage") as MockStorage:
+        with patch("edword.common.discover_project", return_value=mock_project):
+            with patch("edword.common.get_book_by_name", return_value=mock_project.books[0]):
+                with patch("edword.common.IndexStorage") as MockStorage:
                     MockStorage.return_value.load_accumulated_index.return_value = None
                     with pytest.raises(QueryError, match="No index"):
                         query_character(mock_project_root, "Greg")
