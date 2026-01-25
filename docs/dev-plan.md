@@ -65,14 +65,14 @@ echo "Greg's blue eyes sparkled" | edword check --json
 - [x] Add unit tests (88 tests in test_check.py)
 - [x] Create shared `common.py` module for code reuse
 
-### Phase 3: JSON Output Everywhere
+### Phase 3: JSON Output Everywhere (COMPLETE)
 Add `--json` flag to all commands for AI consumption.
 
 **Tasks:**
-- [ ] `edword index status --json`
-- [ ] `edword index build --json` (progress + result)
-- [ ] `edword analyze --json`
-- [ ] `edword info --json`
+- [x] `edword index show --json` (summary and chapter detail)
+- [x] `edword index build --json` (progress + result + contradiction details)
+- [x] `edword analyze --json`
+- [x] `edword info --json`
 
 ### Phase 4: MCP Server (Optional)
 For AI assistants with MCP support (faster than CLI).

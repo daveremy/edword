@@ -78,10 +78,13 @@ You don't need to rebuild:
 If your AI has access to the terminal, it might run:
 
 ```bash
-# Quick check of index status
-edword index show
+# Project info (JSON for AI parsing)
+edword info --json
 
-# Query specific character (returns JSON for AI parsing)
+# Quick check of index status
+edword index show --json
+
+# Query specific character
 edword query character "Maya" --json
 
 # Query timeline events
@@ -90,9 +93,14 @@ edword query timeline --json
 # Search across everything
 edword query search "neural interface" --json
 
-# Check a specific chapter
-edword analyze --chapters 5 --index
+# Check new text for conflicts
+echo "Greg is 35" | edword check --json
+
+# Run analysis passes
+edword analyze --chapters 5 --index --json
 ```
+
+All commands support `--json` for structured output that AI assistants can parse.
 
 ---
 

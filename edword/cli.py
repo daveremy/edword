@@ -48,9 +48,44 @@ def info(
     config_path: Optional[Path] = typer.Option(
         None, "--config", "-c", help="Path to config file"
     ),
+    json_output: bool = typer.Option(
+        False, "--json", "-j", help="Output as JSON"
+    ),
 ):
     """Show project information and structure."""
     config, project = get_config_and_project(config_path)
+
+    if json_output:
+        _output_json({
+            "project": {
+                "name": config.project_name,
+                "root": str(project.root),
+            },
+            "config": {
+                "path": str(config.config_path) if config.config_path else None,
+                "found": config.config_path is not None,
+            },
+            "manuscripts": {
+                "directory": str(project.manuscripts_dir) if project.manuscripts_dir else None,
+                "found": project.has_manuscripts,
+                "books": [
+                    {"id": b.name, "chapters": b.chapter_count}
+                    for b in project.books
+                ],
+                "total_chapters": sum(b.chapter_count for b in project.books),
+            },
+            "codex": {
+                "directory": str(project.codex_dir) if project.codex_dir else None,
+                "found": project.has_codex,
+                "files": len(project.codex_files) if project.codex_files else 0,
+            },
+            "llm": {
+                "provider": config.llm.provider,
+                "model": config.llm.model,
+                "recursive_model": config.llm.recursive_model,
+            },
+        })
+        return
 
     # Header
     console.print(Panel(
@@ -168,6 +203,104 @@ def passes():
     console.print(table)
 
 
+def _serialize_finding(finding) -> dict:
+    """Convert Finding dataclass to JSON-safe dict."""
+    return {
+        "severity": finding.severity.value,  # Enum -> string
+        "message": finding.message,
+        "location": finding.location,
+        "context": finding.context,
+        "suggestion": finding.suggestion,
+    }
+
+
+def _serialize_pass_result(result) -> dict:
+    """Convert PassResult dataclass to JSON-safe dict."""
+    return {
+        "pass_name": result.pass_name,
+        "error": result.error,
+        "findings": [_serialize_finding(f) for f in (result.findings or [])],
+        "stats": result.stats,
+        "summary": {
+            "errors": len(result.errors or []),
+            "warnings": len(result.warnings or []),
+            "info": len(result.infos or []),
+        },
+    }
+
+
+def _output_json(data: dict) -> None:
+    """Output dict as formatted JSON to stdout."""
+    import json
+    print(json.dumps(data, indent=2, default=str))
+
+
+def _make_chapter_result(
+    chapter_id: str,
+    success: bool,
+    status: str,
+    time_ms: float = 0,
+    llm_calls: int = 0,
+    retries: int = 0,
+    error: str = None,
+) -> dict:
+    """Build a chapter result dict for JSON output."""
+    result = {
+        "id": chapter_id,
+        "success": success,
+        "status": status,
+        "time_ms": time_ms,
+        "llm_calls": llm_calls,
+        "error": error,
+    }
+    if retries > 0:
+        result["retries"] = retries
+    return result
+
+
+def _extraction_result_to_json(chapter_id: str, result) -> dict:
+    """Convert an extraction result to a chapter result dict."""
+    timing = result.timing
+    return _make_chapter_result(
+        chapter_id=chapter_id,
+        success=result.success,
+        status="extracted" if result.success else "failed",
+        time_ms=timing.total_ms if timing else 0,
+        llm_calls=timing.llm_call_count if timing else 0,
+        retries=result.retries_used,
+        error=result.error,
+    )
+
+
+def _chapter_sort_key(item: dict) -> int:
+    """Extract chapter number for sorting (e.g., 'chapter-01-foo' -> 1)."""
+    import re
+    match = re.search(r'\d+', item["id"])
+    return int(match.group()) if match else 0
+
+
+def _serialize_contradiction(c) -> dict:
+    """Convert a Contradiction to a JSON-safe dict."""
+    return {
+        "entity_type": c.entity_type,
+        "entity_id": c.entity_id,
+        "predicate": c.predicate,
+        "chapter1": c.chapter1,
+        "value1": c.value1,
+        "chapter2": c.chapter2,
+        "value2": c.value2,
+        "message": c.message,
+    }
+
+
+def _error_json(message: str, json_output: bool) -> None:
+    """Output error message, as JSON if requested."""
+    if json_output:
+        _output_json({"status": "error", "message": message})
+    else:
+        console.print(f"[red]Error:[/red] {message}")
+
+
 @app.command()
 def analyze(
     pass_names: Optional[List[str]] = typer.Argument(
@@ -191,6 +324,9 @@ def analyze(
     verbose: bool = typer.Option(
         False, "--verbose", "-v", help="Show verbose output"
     ),
+    json_output: bool = typer.Option(
+        False, "--json", "-j", help="Output as JSON"
+    ),
     config_path: Optional[Path] = typer.Option(
         None, "--config", "-c", help="Path to config file"
     ),
@@ -200,19 +336,18 @@ def analyze(
 
     # Validate project structure
     if not project.has_manuscripts:
-        console.print("[red]Error:[/red] No manuscripts directory found")
+        _error_json("No manuscripts directory found", json_output)
         raise typer.Exit(1)
 
     if not project.books:
-        console.print("[red]Error:[/red] No books found in manuscripts directory")
+        _error_json("No books found in manuscripts directory", json_output)
         raise typer.Exit(1)
 
     # Select book
     if book:
         selected_book = get_book_by_name(project, book)
         if not selected_book:
-            console.print(f"[red]Error:[/red] Book '{book}' not found")
-            console.print(f"Available: {', '.join(b.name for b in project.books)}")
+            _error_json(f"Book '{book}' not found. Available: {', '.join(b.name for b in project.books)}", json_output)
             raise typer.Exit(1)
     else:
         selected_book = project.books[0]
@@ -228,41 +363,47 @@ def analyze(
                 ch = int(chapters)
                 chapter_range = (ch, ch)
         except ValueError:
-            console.print(f"[red]Error:[/red] Invalid chapter range: {chapters}")
+            _error_json(f"Invalid chapter range: {chapters}", json_output)
             raise typer.Exit(1)
 
-    # Show what we're analyzing
-    console.print(Panel(
-        f"[bold]{config.project_name}[/bold]\n"
-        f"Book: {selected_book.name} ({selected_book.chapter_count} chapters)"
-        + (f"\nChapters: {chapters}" if chapters else ""),
-        title="Analyzing",
-        border_style="blue",
-    ))
+    # Show what we're analyzing (skip for JSON)
+    if not json_output:
+        console.print(Panel(
+            f"[bold]{config.project_name}[/bold]\n"
+            f"Book: {selected_book.name} ({selected_book.chapter_count} chapters)"
+            + (f"\nChapters: {chapters}" if chapters else ""),
+            title="Analyzing",
+            border_style="blue",
+        ))
 
     # Compile manuscript
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        progress.add_task("Compiling manuscript...", total=None)
-        manuscript = compile_manuscript(selected_book, chapter_range)
-
-    console.print(f"[dim]Manuscript: {len(manuscript):,} characters[/dim]")
-
-    # Load codex if available and not disabled
-    codex = ""
-    if project.has_codex and not no_codex:
+    if not json_output:
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             console=console,
         ) as progress:
-            progress.add_task("Loading codex...", total=None)
+            progress.add_task("Compiling manuscript...", total=None)
+            manuscript = compile_manuscript(selected_book, chapter_range)
+        console.print(f"[dim]Manuscript: {len(manuscript):,} characters[/dim]")
+    else:
+        manuscript = compile_manuscript(selected_book, chapter_range)
+
+    # Load codex if available and not disabled
+    codex = ""
+    if project.has_codex and not no_codex:
+        if not json_output:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                progress.add_task("Loading codex...", total=None)
+                codex = load_codex(project.codex_dir)
+            console.print(f"[dim]Codex: {len(codex):,} characters[/dim]")
+        else:
             codex = load_codex(project.codex_dir)
-        console.print(f"[dim]Codex: {len(codex):,} characters[/dim]")
-    elif no_codex:
+    elif no_codex and not json_output:
         console.print(f"[dim]Codex: skipped (--no-codex)[/dim]")
 
     # Load accumulated index if requested
@@ -271,10 +412,11 @@ def analyze(
         from .index.storage import IndexStorage
         storage = IndexStorage(config.project_root, str(config.paths.index))
         accumulated_index = storage.load_accumulated_index(selected_book.name)
-        if accumulated_index:
-            console.print(f"[dim]Index: {len(accumulated_index.characters)} characters, {len(accumulated_index.timeline)} events[/dim]")
-        else:
-            console.print(f"[yellow]Warning:[/yellow] No index found for {selected_book.name}. Run 'edword index build' first.")
+        if not json_output:
+            if accumulated_index:
+                console.print(f"[dim]Index: {len(accumulated_index.characters)} characters, {len(accumulated_index.timeline)} events[/dim]")
+            else:
+                console.print(f"[yellow]Warning:[/yellow] No index found for {selected_book.name}. Run 'edword index build' first.")
 
     # Determine which passes to run
     if pass_names:
@@ -288,7 +430,8 @@ def analyze(
         if not passes_to_run:
             passes_to_run = ["continuity"]  # Default
 
-    console.print(f"\n[bold]Running passes:[/bold] {', '.join(passes_to_run)}")
+    if not json_output:
+        console.print(f"\n[bold]Running passes:[/bold] {', '.join(passes_to_run)}")
 
     # Import and run passes
     from .passes import run_passes
@@ -300,6 +443,21 @@ def analyze(
         verbose=verbose,
         index=accumulated_index,
     )
+
+    # JSON output
+    if json_output:
+        successful_results = [r for r in results if not r.error]
+        _output_json({
+            "status": "success",
+            "book": selected_book.name,
+            "passes": [_serialize_pass_result(r) for r in results],
+            "summary": {
+                "total_errors": sum(len(r.errors or []) for r in successful_results),
+                "total_warnings": sum(len(r.warnings or []) for r in successful_results),
+                "total_info": sum(len(r.infos or []) for r in successful_results),
+            },
+        })
+        return
 
     # Display results
     console.print("\n")
@@ -454,33 +612,37 @@ def index_build(
     workers: int = typer.Option(
         1, "--workers", "-w", help="Number of parallel workers (1=sequential)"
     ),
+    json_output: bool = typer.Option(
+        False, "--json", "-j", help="Output as JSON"
+    ),
     config_path: Optional[Path] = typer.Option(
         None, "--config", "-c", help="Path to config file"
     ),
 ):
     """Build chapter index for a book."""
+    import time
     import concurrent.futures
     from .index import (
         IndexStorage, Accumulator, ExtractionConfig,
         extract_chapter, EntityList
     )
 
+    build_start = time.perf_counter()
     config, project = get_config_and_project(config_path)
 
     if not project.has_manuscripts:
-        console.print("[red]Error:[/red] No manuscripts directory found")
+        _error_json("No manuscripts directory found", json_output)
         raise typer.Exit(1)
 
     if not project.books:
-        console.print("[red]Error:[/red] No books found")
+        _error_json("No books found", json_output)
         raise typer.Exit(1)
 
     # Select book
     if book:
         selected_book = get_book_by_name(project, book)
         if not selected_book:
-            console.print(f"[red]Error:[/red] Book '{book}' not found")
-            console.print(f"Available: {', '.join(b.name for b in project.books)}")
+            _error_json(f"Book '{book}' not found. Available: {', '.join(b.name for b in project.books)}", json_output)
             raise typer.Exit(1)
     else:
         selected_book = project.books[0]
@@ -497,19 +659,23 @@ def index_build(
         verbose=verbose,
     )
 
-    parallel_info = f" (parallel: {workers} workers)" if workers > 1 else ""
-    console.print(Panel(
-        f"[bold]{config.project_name}[/bold]\n"
-        f"Book: {selected_book.name}\n"
-        f"Chapters: {selected_book.chapter_count}{parallel_info}",
-        title="Building Index",
-        border_style="blue",
-    ))
+    if not json_output:
+        parallel_info = f" (parallel: {workers} workers)" if workers > 1 else ""
+        console.print(Panel(
+            f"[bold]{config.project_name}[/bold]\n"
+            f"Book: {selected_book.name}\n"
+            f"Chapters: {selected_book.chapter_count}{parallel_info}",
+            title="Building Index",
+            border_style="blue",
+        ))
 
     # Process each chapter
     chapters_indexed = 0
     chapters_skipped = 0
     errors = []
+
+    # JSON output: collect chapter results
+    chapter_results_json = []
 
     # First pass: identify which chapters need extraction
     chapters_to_extract = []  # [(index, chapter_id, chapter_path), ...]
@@ -522,7 +688,7 @@ def index_build(
         else:
             chapters_to_extract.append((i, chapter_id, chapter_path))
 
-    if chapters_to_load:
+    if chapters_to_load and not json_output:
         console.print(f"[dim]Skipping {len(chapters_to_load)} cached chapters[/dim]")
 
     # Results storage: index -> ExtractionResult or loaded ChapterIndex
@@ -534,12 +700,17 @@ def index_build(
         if existing:
             results[i] = ("loaded", existing)
             chapters_skipped += 1
+            chapter_results_json.append(
+                _make_chapter_result(chapter_id, success=True, status="cached")
+            )
 
     if not chapters_to_extract:
-        console.print("[dim]All chapters already indexed[/dim]")
+        if not json_output:
+            console.print("[dim]All chapters already indexed[/dim]")
     elif workers > 1 and len(chapters_to_extract) > 1:
         # Parallel extraction
-        console.print(f"[cyan]Extracting {len(chapters_to_extract)} chapters with {workers} workers...[/cyan]")
+        if not json_output:
+            console.print(f"[cyan]Extracting {len(chapters_to_extract)} chapters with {workers} workers...[/cyan]")
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             # Submit all extraction tasks
@@ -561,8 +732,80 @@ def index_build(
                 try:
                     result = future.result()
                     results[i] = ("extracted", result)
+                    chapter_results_json.append(_extraction_result_to_json(chapter_id, result))
 
-                    # Show progress
+                    # Show progress (only for non-JSON)
+                    if not json_output:
+                        if result.success:
+                            if result.timing:
+                                t = result.timing
+                                retries_info = f" [yellow]({result.retries_used} retries)[/yellow]" if result.retries_used > 0 else ""
+                                console.print(
+                                    f"  [green]✓[/green] {chapter_id}: "
+                                    f"[dim]{t.total_ms/1000:.1f}s[/dim] "
+                                    f"([cyan]{t.llm_calls_ms/1000:.1f}s[/cyan] LLM × {t.llm_call_count})"
+                                    f"{retries_info}"
+                                )
+                        else:
+                            if result.timing:
+                                console.print(
+                                    f"  [red]✗[/red] {chapter_id}: {result.error} "
+                                    f"[dim]({result.timing.total_ms/1000:.1f}s)[/dim]"
+                                )
+                            else:
+                                console.print(f"  [red]✗[/red] {chapter_id}: {result.error}")
+                except Exception as e:
+                    if not json_output:
+                        console.print(f"  [red]✗[/red] {chapter_id}: Exception: {e}")
+                    results[i] = ("error", str(e))
+                    chapter_results_json.append(
+                        _make_chapter_result(chapter_id, success=False, status="exception", error=str(e))
+                    )
+    else:
+        # Sequential extraction (original behavior)
+        if json_output:
+            # No progress bar for JSON
+            for i, chapter_id, chapter_path in chapters_to_extract:
+                entity_list = accumulator.get_entity_list()
+                result = extract_chapter(
+                    chapter_path=chapter_path,
+                    book_id=selected_book.name,
+                    chapter_id=chapter_id,
+                    entity_list=entity_list if entity_list.characters else None,
+                    config=extraction_config,
+                )
+                results[i] = ("extracted", result)
+                chapter_results_json.append(_extraction_result_to_json(chapter_id, result))
+                # For sequential mode, accumulate immediately to build entity list
+                if result.success:
+                    storage.save_chapter_index(result.index)
+                    accumulator.add_chapter(result.index)
+        else:
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                console=console,
+            ) as progress:
+                for i, chapter_id, chapter_path in chapters_to_extract:
+                    task = progress.add_task(
+                        f"Indexing {chapter_id}... ({i+1}/{selected_book.chapter_count})",
+                        total=None
+                    )
+
+                    # Get entity list from accumulated so far (sequential mode only)
+                    entity_list = accumulator.get_entity_list()
+
+                    result = extract_chapter(
+                        chapter_path=chapter_path,
+                        book_id=selected_book.name,
+                        chapter_id=chapter_id,
+                        entity_list=entity_list if entity_list.characters else None,
+                        config=extraction_config,
+                    )
+
+                    progress.remove_task(task)
+                    results[i] = ("extracted", result)
+
                     if result.success:
                         if result.timing:
                             t = result.timing
@@ -581,56 +824,8 @@ def index_build(
                             )
                         else:
                             console.print(f"  [red]✗[/red] {chapter_id}: {result.error}")
-                except Exception as e:
-                    console.print(f"  [red]✗[/red] {chapter_id}: Exception: {e}")
-                    results[i] = ("error", str(e))
-    else:
-        # Sequential extraction (original behavior)
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            console=console,
-        ) as progress:
-            for i, chapter_id, chapter_path in chapters_to_extract:
-                task = progress.add_task(
-                    f"Indexing {chapter_id}... ({i+1}/{selected_book.chapter_count})",
-                    total=None
-                )
 
-                # Get entity list from accumulated so far (sequential mode only)
-                entity_list = accumulator.get_entity_list()
-
-                result = extract_chapter(
-                    chapter_path=chapter_path,
-                    book_id=selected_book.name,
-                    chapter_id=chapter_id,
-                    entity_list=entity_list if entity_list.characters else None,
-                    config=extraction_config,
-                )
-
-                progress.remove_task(task)
-                results[i] = ("extracted", result)
-
-                if result.success:
-                    if result.timing:
-                        t = result.timing
-                        retries_info = f" [yellow]({result.retries_used} retries)[/yellow]" if result.retries_used > 0 else ""
-                        console.print(
-                            f"  [green]✓[/green] {chapter_id}: "
-                            f"[dim]{t.total_ms/1000:.1f}s[/dim] "
-                            f"([cyan]{t.llm_calls_ms/1000:.1f}s[/cyan] LLM × {t.llm_call_count})"
-                            f"{retries_info}"
-                        )
-                else:
-                    if result.timing:
-                        console.print(
-                            f"  [red]✗[/red] {chapter_id}: {result.error} "
-                            f"[dim]({result.timing.total_ms/1000:.1f}s)[/dim]"
-                        )
-                    else:
-                        console.print(f"  [red]✗[/red] {chapter_id}: {result.error}")
-
-    # Accumulate all results in chapter order
+    # Accumulate all results in chapter order (for non-JSON sequential mode, already done above)
     for i in range(len(selected_book.chapters)):
         if i not in results:
             continue
@@ -644,12 +839,14 @@ def index_build(
         elif status == "extracted":
             result = data
             if result.success:
-                storage.save_chapter_index(result.index)
-                contradictions = accumulator.add_chapter(result.index)
+                # Only save if not already saved in sequential JSON mode
+                if not json_output or workers > 1:
+                    storage.save_chapter_index(result.index)
+                    contradictions = accumulator.add_chapter(result.index)
+                    if contradictions and verbose and not json_output:
+                        for c in contradictions:
+                            console.print(f"  [yellow]Contradiction ({chapter_id}):[/yellow] {c.message}")
                 chapters_indexed += 1
-                if contradictions and verbose:
-                    for c in contradictions:
-                        console.print(f"  [yellow]Contradiction ({chapter_id}):[/yellow] {c.message}")
             else:
                 errors.append((chapter_id, result.error))
         elif status == "error":
@@ -659,7 +856,31 @@ def index_build(
     acc_result = accumulator.get_result()
     storage.save_accumulated_index(acc_result.index)
 
-    # Summary
+    build_time_ms = (time.perf_counter() - build_start) * 1000
+
+    # JSON output
+    if json_output:
+        acc_index = acc_result.index
+        _output_json({
+            "status": "success" if not errors else "partial",
+            "book": selected_book.name,
+            "chapters_processed": len(selected_book.chapters),
+            "chapters_indexed": chapters_indexed,
+            "chapters_skipped": chapters_skipped,
+            "errors": len(errors),
+            "contradictions": len(acc_result.contradictions),
+            "contradiction_details": [_serialize_contradiction(c) for c in acc_result.contradictions],
+            "total_time_ms": round(build_time_ms, 1),
+            "chapters": sorted(chapter_results_json, key=_chapter_sort_key),
+            "summary": {
+                "characters": len(acc_index.characters) if acc_index else 0,
+                "timeline_events": len(acc_index.timeline) if acc_index else 0,
+                "locations": len(acc_index.locations) if acc_index else 0,
+            },
+        })
+        return
+
+    # Summary (Rich output)
     console.print()
     if errors:
         console.print(Panel(
@@ -688,6 +909,9 @@ def index_show(
     chapter: Optional[str] = typer.Option(
         None, "--chapter", "-ch", help="Specific chapter to show"
     ),
+    json_output: bool = typer.Option(
+        False, "--json", "-j", help="Output as JSON"
+    ),
     config_path: Optional[Path] = typer.Option(
         None, "--config", "-c", help="Path to config file"
     ),
@@ -702,22 +926,49 @@ def index_show(
     stats = storage.get_stats(book)
 
     if not stats["books"]:
-        console.print("[dim]No indices found. Run 'edword index build' first.[/dim]")
+        if json_output:
+            _output_json({"status": "error", "message": "No indices found"})
+        else:
+            console.print("[dim]No indices found. Run 'edword index build' first.[/dim]")
         return
 
     if chapter:
         # Show specific chapter
         book_id = book or (stats["books"][0]["book_id"] if stats["books"] else None)
         if not book_id:
-            console.print("[red]Error:[/red] Specify --book")
+            _error_json("Specify --book", json_output)
             raise typer.Exit(1)
 
         index = storage.load_chapter_index(book_id, chapter)
         if not index:
-            console.print(f"[red]Error:[/red] Chapter '{chapter}' not found in index")
+            _error_json(f"Chapter '{chapter}' not found in index", json_output)
             raise typer.Exit(1)
 
-        # Show chapter details
+        if json_output:
+            _output_json({
+                "book_id": book_id,
+                "chapter_id": chapter,
+                "source_path": str(index.source_path) if index.source_path else None,
+                "extracted_at": str(index.extracted_at) if index.extracted_at else None,
+                "characters": [
+                    {
+                        "id": c.id,
+                        "canonical_name": c.canonical_name,
+                        "mentions": c.mentions,
+                        "facts_count": len(c.facts),
+                    }
+                    for c in index.characters
+                ],
+                "timeline_events": len(index.timeline),
+                "locations": [{"id": loc.id, "name": loc.name} for loc in index.locations],
+                "artifacts": len(index.artifacts),
+                "world_facts": len(index.world_facts),
+                "terminology": len(index.terminology),
+                "narrative_elements": len(index.narrative),
+            })
+            return
+
+        # Rich output for specific chapter
         console.print(Panel(
             f"[bold]{book_id} / {chapter}[/bold]\n"
             f"Source: {index.source_path}\n"
@@ -746,6 +997,23 @@ def index_show(
 
     else:
         # Show summary
+        if json_output:
+            _output_json({
+                "books": [
+                    {
+                        "book_id": b["book_id"],
+                        "chapters": b["chapters"],
+                        "has_accumulated": b["has_accumulated"],
+                        "size_kb": round(b["size_bytes"] / 1024, 1),
+                    }
+                    for b in stats["books"]
+                ],
+                "total_chapters": stats["total_chapters"],
+                "total_size_kb": round(stats["total_size_bytes"] / 1024, 1),
+            })
+            return
+
+        # Rich output for summary
         table = Table(title="Index Summary")
         table.add_column("Book", style="cyan")
         table.add_column("Chapters", justify="right")
