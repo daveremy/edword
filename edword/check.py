@@ -363,6 +363,7 @@ def _extract_age_in_window(
     - "[Name] is/was [N] years old"
     - "[Name], [N]," (appositive)
     - "[N]-year-old [Name]"
+    - "[Name], a [N]-year-old [noun]"
 
     Returns:
         (age, confidence, match_start, match_end) or None
@@ -391,6 +392,14 @@ def _extract_age_in_window(
     # Pattern 3: "[N]-year-old [Name]"
     pattern3 = rf"(\d{{1,3}})\s*-?\s*year\s*-?\s*old\s+{name_escaped}\b"
     match = re.search(pattern3, window, re.IGNORECASE)
+    if match:
+        age = int(match.group(1))
+        if 0 < age < 150:
+            return (age, 0.85, match.start(), match.end())
+
+    # Pattern 4: "[Name], a [N]-year-old [noun]"
+    pattern4 = rf"\b{name_escaped}\b\s*,\s*(?:a|an)\s+(\d{{1,3}})\s*-?\s*year\s*-?\s*old\b"
+    match = re.search(pattern4, window, re.IGNORECASE)
     if match:
         age = int(match.group(1))
         if 0 < age < 150:

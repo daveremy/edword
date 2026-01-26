@@ -2,6 +2,135 @@
 
 *For AI assistants helping authors write novels*
 
+## Setup
+
+### Installation
+
+Install edword with MCP support:
+
+```bash
+pip install edword[mcp]
+# or with uv:
+uv pip install edword[mcp]
+```
+
+### Claude Code Configuration
+
+Add to your project's `.mcp.json` file in the project root:
+
+```json
+{
+  "mcpServers": {
+    "edword": {
+      "command": "/path/to/your/venv/bin/edword",
+      "args": ["mcp", "serve"],
+      "env": {
+        "EDWORD_PROJECT_ROOT": "/path/to/your/manuscript/project"
+      }
+    }
+  }
+}
+```
+
+Example for the Myriad Trilogy:
+
+```json
+{
+  "mcpServers": {
+    "edword": {
+      "command": "/Users/dremy/books/edword/.venv/bin/edword",
+      "args": ["mcp", "serve"],
+      "env": {
+        "EDWORD_PROJECT_ROOT": "/Users/dremy/books/myriad_trilogy"
+      }
+    }
+  }
+}
+```
+
+When you start Claude Code in the project, it will detect the MCP server and prompt you to approve it.
+
+### Claude Desktop Configuration
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+```json
+{
+  "mcpServers": {
+    "edword": {
+      "command": "/path/to/your/venv/bin/edword",
+      "args": ["mcp", "serve"],
+      "env": {
+        "EDWORD_PROJECT_ROOT": "/path/to/your/manuscript/project"
+      }
+    }
+  }
+}
+```
+
+### Codex CLI Configuration
+
+For OpenAI's Codex CLI, create or edit `~/.codex/config.yaml`:
+
+```yaml
+mcp_servers:
+  edword:
+    command: /path/to/your/venv/bin/edword
+    args:
+      - mcp
+      - serve
+    env:
+      EDWORD_PROJECT_ROOT: /path/to/your/manuscript/project
+```
+
+Or use the command-line flag:
+```bash
+codex --mcp-server "edword:/path/to/edword mcp serve" "Query Greg Walsh's facts"
+```
+
+### Gemini CLI Configuration
+
+For Google's Gemini CLI, create or edit `~/.gemini/config.yaml`:
+
+```yaml
+mcp_servers:
+  edword:
+    command: /path/to/your/venv/bin/edword
+    args:
+      - mcp
+      - serve
+    env:
+      EDWORD_PROJECT_ROOT: /path/to/your/manuscript/project
+```
+
+Or use environment variables:
+```bash
+export GEMINI_MCP_SERVERS='{"edword":{"command":"/path/to/edword","args":["mcp","serve"],"env":{"EDWORD_PROJECT_ROOT":"/path/to/project"}}}'
+gemini -p "What do we know about Greg Walsh?"
+```
+
+### Generic MCP Setup
+
+For any MCP-compatible client, edword exposes a stdio-based MCP server:
+
+```bash
+# Start the MCP server (stdio transport)
+edword mcp serve
+
+# With explicit project root
+EDWORD_PROJECT_ROOT=/path/to/project edword mcp serve
+```
+
+The server follows the [Model Context Protocol](https://modelcontextprotocol.io/) specification and should work with any compliant client.
+
+### Verifying Setup
+
+After configuration, restart your AI assistant. The edword tools should appear in the available tools list. You can verify by asking the assistant to check the index status:
+
+```
+"Use edword to check the manuscript index status"
+```
+
 ## Overview
 
 Edword provides tools to help you maintain consistency while assisting with novel writing. The author builds an index of their manuscript; you query it to recall facts and check new content.
@@ -21,13 +150,13 @@ Author's Workflow                    Your Workflow (AI Assistant)
 
 ## Available Tools
 
-### `query_character(name: str) -> CharacterFacts`
+### `edword_query_character(name, book?, project_root?)`
 
 Look up everything known about a character.
 
 ```python
 # Example usage
-facts = query_character("Greg Walsh")
+facts = edword_query_character(name="Greg Walsh")
 # Returns: age, relationships, appearances, state changes, etc.
 ```
 
@@ -36,12 +165,12 @@ facts = query_character("Greg Walsh")
 - When the author asks "What do we know about X?"
 - To check a character's current state (alive? injured? location?)
 
-### `query_timeline(book: str, chapter_range?: str) -> TimelineEvents`
+### `edword_query_timeline(book?, chapter_range?, limit?, project_root?)`
 
 Get timeline events, optionally filtered by chapter range.
 
 ```python
-events = query_timeline("book1", "1-10")
+events = edword_query_timeline(book="book1", chapter_range="1-10")
 # Returns: events with relative ordering, dates, durations
 ```
 
@@ -50,16 +179,68 @@ events = query_timeline("book1", "1-10")
 - To check "how long ago" calculations
 - To verify event sequences
 
-### `check_consistency(text: str, book: str) -> ConsistencyResult`
+### `edword_query_location(name, book?, project_root?)`
+
+Look up location details.
+
+```python
+location = edword_query_location(name="Cascade Labs")
+# Returns: description, characters present, significance
+```
+
+**When to use:**
+- Before writing scenes in a specific location
+- To check what details have been established about a place
+
+### `edword_query_artifact(name, book?, project_root?)`
+
+Look up significant items or artifacts.
+
+```python
+artifact = edword_query_artifact(name="Neural Headset")
+# Returns: status, holder, significance
+```
+
+**When to use:**
+- When referencing important objects in the story
+- To check an item's current state or location
+
+### `edword_query_world(term, book?, as_of_chapter?, project_root?)`
+
+Search world-building facts and terminology.
+
+```python
+facts = edword_query_world(term="neural interface", as_of_chapter="5")
+# Returns: world facts and terminology established by chapter 5
+```
+
+**When to use:**
+- When writing about technology, magic systems, or world rules
+- To check what the reader knows at a given point in the story
+
+### `edword_query_search(query, book?, limit?, project_root?)`
+
+Search across all index dimensions.
+
+```python
+results = edword_query_search(query="Myriad")
+# Returns: characters, locations, events, artifacts, facts, terms
+```
+
+**When to use:**
+- When you need to find anything related to a topic
+- For open-ended exploration of the story world
+
+### `edword_check_text(text, book?, project_root?)`
 
 Check if new text contradicts the existing index.
 
 ```python
-result = check_consistency(
-    "Sarah's blue eyes sparkled in the moonlight.",
-    "book1"
+result = edword_check_text(
+    text="Sarah's blue eyes sparkled in the moonlight.",
+    book="book1"
 )
-# Returns: {conflicts: [{field: "eye_color", indexed: "brown", new: "blue"}]}
+# Returns: {has_conflicts: true, conflicts: [{field: "eye_color", indexed: "brown", new: "blue"}]}
 ```
 
 **When to use:**
@@ -67,13 +248,13 @@ result = check_consistency(
 - When introducing facts about characters
 - After writing a significant scene
 
-### `get_index_status() -> IndexStatus`
+### `edword_index_status(project_root?)`
 
 Check if the index exists and when it was last updated.
 
 ```python
-status = get_index_status()
-# Returns: {exists: true, last_updated: "2026-01-24T10:30:00", chapters: 31, stale: false}
+status = edword_index_status()
+# Returns: {project_name: "...", books: [...], total_chapters: 31, stale: false}
 ```
 
 **When to use:**
@@ -89,7 +270,7 @@ At the start of a writing session:
 
 ```
 You: "Let me check the story index status..."
-[calls get_index_status()]
+[calls edword_index_status()]
 You: "The index was last updated 3 days ago and covers 31 chapters.
       If you've made significant changes since then, consider running
       `edword index build` to update it."
@@ -100,7 +281,7 @@ You: "The index was last updated 3 days ago and covers 31 chapters.
 Before writing: "Sarah brushed her dark hair from her face..."
 
 ```
-[calls query_character("Sarah")]
+[calls edword_query_character(name="Sarah")]
 # Check: What color is Sarah's hair in the index?
 # If not specified → safe to introduce
 # If "blonde" → warn the author or match existing
@@ -111,7 +292,7 @@ Before writing: "Sarah brushed her dark hair from her face..."
 After helping write a major scene:
 
 ```
-[calls check_consistency(new_scene_text, "book1")]
+[calls edword_check_text(text=new_scene_text, book="book1")]
 # Report any conflicts to the author
 ```
 
@@ -147,19 +328,19 @@ You: "I don't have information about Detective Torres in the index.
 ### Scenario: Author Asks "What color are Sarah's eyes?"
 
 ```python
-facts = query_character("Sarah")
-if "eye_color" in facts:
-    return f"According to the index, Sarah has {facts.eye_color} eyes,
-             established in {facts.eye_color_source}."
-else:
-    return "I don't have Sarah's eye color in the index.
-            This might not be established yet - would you like to decide now?"
+facts = edword_query_character(name="Sarah")
+if facts.get("found") and facts.get("character"):
+    # Look for eye_color in facts
+    for fact in facts["character"].get("facts", []):
+        if fact["predicate"] == "eye_color":
+            return f"According to the index, Sarah has {fact['value']} eyes."
+return "I don't have Sarah's eye color in the index. This might not be established yet."
 ```
 
 ### Scenario: Author Wants to Write a Flashback
 
 ```python
-timeline = query_timeline("book1")
+timeline = edword_query_timeline(book="book1")
 # Find the relevant event
 # Check relative timing
 # Help write with accurate "X months ago" references
@@ -169,7 +350,7 @@ timeline = query_timeline("book1")
 
 ```python
 # Read the new chapter text
-check_consistency(chapter_text, "book1")
+result = edword_check_text(text=chapter_text, book="book1")
 # Report any conflicts with existing canon
 ```
 
@@ -222,12 +403,20 @@ When the author has terminal access, you can suggest CLI commands:
 |-----------|---------|
 | Need to update index | `edword index build` |
 | Check for issues | `edword analyze --index` |
-| View character details | `edword ask "Tell me about [character]"` |
+| View character details | `edword query character "Greg Walsh"` |
 | Debug missing data | `edword index show` |
 
 ## Performance Considerations
 
 - Queries against the index are fast (milliseconds)
-- `check_consistency` is fast for short text, slower for full chapters
+- `edword_check_text` is fast for short text, slower for full chapters
 - Never suggest rebuilding the index casually - it costs time and money
 - Batch your queries when possible rather than making many small calls
+
+## Tool Parameter Reference
+
+All tools accept an optional `project_root` parameter. If not provided, the tool uses:
+1. The `EDWORD_PROJECT_ROOT` environment variable (set in MCP config)
+2. Auto-discovery by searching for `edword.yaml` up from the current directory
+
+For most configurations, you don't need to pass `project_root` explicitly.

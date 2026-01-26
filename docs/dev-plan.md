@@ -17,9 +17,7 @@ AI-powered editorial memory for long-form fiction. The author never leaves their
 - **LLM Providers**: Claude CLI, Gemini CLI support
 
 ### Not Yet Implemented
-- MCP server for AI assistant integration
 - CoVe verification for high-severity findings
-- `--json` flag for remaining commands (index status, analyze, info)
 
 ---
 
@@ -74,31 +72,28 @@ Add `--json` flag to all commands for AI consumption.
 - [x] `edword analyze --json`
 - [x] `edword info --json`
 
-### Phase 4: MCP Server
+### Phase 4: MCP Server (COMPLETE)
 **Priority integration for AI writing assistants.** MCP provides seamless tool access - the AI calls `query_character("Greg")` directly instead of spawning shell commands and parsing JSON.
 
 CLI remains valuable for manual usage, scripting, and AI assistants without MCP support. But MCP is how the assistant *should* interact during a writing session.
 
-```python
-@mcp.tool()
-def query_character(name: str, book: str = None) -> dict: ...
-
-@mcp.tool()
-def query_timeline(book: str = None, chapters: str = None) -> dict: ...
-
-@mcp.tool()
-def check_text(text: str, book: str = None) -> dict: ...
-
-@mcp.tool()
-def index_status(book: str = None) -> dict: ...
-```
+**Tools implemented:**
+- `edword_query_character` - Look up character facts, relationships, appearances
+- `edword_query_timeline` - Get timeline events with filtering
+- `edword_query_location` - Look up location details
+- `edword_query_artifact` - Look up significant items
+- `edword_query_world` - Search world facts and terminology
+- `edword_query_search` - Cross-dimensional search
+- `edword_check_text` - Check text for contradictions
+- `edword_index_status` - Get project/index status with staleness detection
 
 **Tasks:**
-- [ ] Create `edword/mcp/server.py` with FastMCP
-- [ ] Implement MCP tools that call same core logic as CLI
-- [ ] Add `edword mcp serve` command
-- [ ] Document MCP setup for Claude Code
-- [ ] Add to trilogy's `.claude/settings.local.json`
+- [x] Create `edword/mcp/server.py` with FastMCP
+- [x] Implement MCP tools that call same core logic as CLI
+- [x] Add `edword mcp serve` command
+- [x] Document MCP setup for Claude Code, Claude Desktop, Codex, Gemini
+- [x] Add to trilogy's `.mcp.json`
+- [x] Add unit tests (24 tests in test_mcp.py)
 
 ### Phase 5: CoVe Verification
 Chain-of-Verification for high-severity findings.

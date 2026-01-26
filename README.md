@@ -61,6 +61,9 @@ gemini --version
 ```bash
 cd ~/books/edword
 pip install -e .
+
+# With MCP support (for AI assistant integration)
+pip install -e ".[mcp]"
 ```
 
 ## Quick Start
@@ -359,16 +362,27 @@ Edword supports multiple interfaces for different use cases:
 ### CLI (Human Users)
 Primary interface for authors and editors. See commands above.
 
-### MCP Server (AI Assistants) - Planned
-For AI writing assistants (Claude Code, etc.) to check consistency in real-time:
+### MCP Server (AI Assistants)
+For AI writing assistants (Claude Code, Codex, Gemini, etc.) to check consistency in real-time.
 
-```python
-# Tools available via MCP
-check_consistency(book, chapters)  # Run analysis passes
-verify_finding(finding_id)         # Verify specific finding
-get_character_facts(character)     # Query character data
-get_timeline(book)                 # Query timeline events
+**Installation:**
+```bash
+pip install edword[mcp]
 ```
+
+**Available Tools:**
+| Tool | Purpose |
+|------|---------|
+| `edword_query_character` | Look up character facts, relationships, appearances |
+| `edword_query_timeline` | Get timeline events, optionally by chapter range |
+| `edword_query_location` | Look up location details |
+| `edword_query_artifact` | Look up significant items |
+| `edword_query_world` | Search world facts and terminology |
+| `edword_query_search` | Cross-dimensional search |
+| `edword_check_text` | Check text for contradictions against index |
+| `edword_index_status` | Get project/index status |
+
+**Configuration:** See [MCP Guide](docs/mcp-guide.md) for setup instructions for Claude Code, Claude Desktop, Codex CLI, and Gemini CLI.
 
 ### Python API (Programmatic)
 For integration into other tools:

@@ -308,6 +308,27 @@ class TestExtractAges:
         assert result is not None
         assert result[0] == 35
 
+    def test_a_year_old_pattern(self):
+        """'Greg, a 35-year-old engineer' -> (35, 0.85)"""
+        result = _extract_age_in_window("Greg, a 35-year-old engineer, walked in.", "Greg")
+        assert result is not None
+        assert result[0] == 35
+        assert result[1] >= 0.8
+
+    def test_an_year_old_pattern(self):
+        """'Greg, an 80-year-old veteran' -> (80, 0.85)"""
+        result = _extract_age_in_window("Greg, an 80-year-old veteran, sat down.", "Greg")
+        assert result is not None
+        assert result[0] == 80
+
+    def test_a_year_old_full_name(self):
+        """'Greg Walsh, a 35-year-old software engineer' -> (35, 0.85)"""
+        result = _extract_age_in_window(
+            "Greg Walsh, a 35-year-old software engineer, drove to work.", "Greg Walsh"
+        )
+        assert result is not None
+        assert result[0] == 35
+
     def test_no_match_without_name(self):
         """'the 35-year-old man' -> None (no name attribution)"""
         result = _extract_age_in_window("The 35-year-old man walked.", "Greg")

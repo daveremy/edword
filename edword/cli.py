@@ -29,6 +29,10 @@ app.add_typer(index_app, name="index")
 query_app = typer.Typer(help="Query the manuscript index.")
 app.add_typer(query_app, name="query")
 
+# MCP subcommand group
+mcp_app = typer.Typer(help="MCP server for AI assistant integration.")
+app.add_typer(mcp_app, name="mcp")
+
 
 def get_config_and_project(
     config_path: Optional[Path] = None
@@ -1484,6 +1488,61 @@ def check_cmd(
         console.print(
             f"[dim]Checked against {result['characters_checked']} character(s)[/dim]"
         )
+
+
+# --- MCP Commands ---
+
+
+@mcp_app.command("serve")
+def mcp_serve(
+    transport: str = typer.Option(
+        "stdio", "--transport", "-t", help="Transport type: stdio or sse"
+    ),
+):
+    """Start the MCP server for AI assistant integration.
+
+    Exposes edword tools via the Model Context Protocol, allowing AI assistants
+    like Claude to query the manuscript index and check text for consistency.
+
+    Examples:
+        edword mcp serve              # Start with stdio transport
+        edword mcp serve -t sse       # Start with SSE transport
+
+    For Claude Code, add to .claude/settings.local.json:
+
+        {
+          "mcpServers": {
+            "edword": {
+              "command": "/path/to/edword",
+              "args": ["mcp", "serve"],
+              "env": {
+                "EDWORD_PROJECT_ROOT": "/path/to/your/project"
+              }
+            }
+          }
+        }
+    """
+    try:
+        from .mcp import main as mcp_main
+    except ImportError as e:
+        console.print(
+            "[red]Error:[/red] FastMCP not installed. "
+            "Install with: pip install edword[mcp]"
+        )
+        console.print(f"[dim]Details: {e}[/dim]")
+        raise typer.Exit(1)
+
+    if transport not in ("stdio", "sse"):
+        console.print(f"[red]Error:[/red] Unknown transport: {transport}")
+        console.print("Supported transports: stdio, sse")
+        raise typer.Exit(1)
+
+    # FastMCP defaults to stdio, which is what we want
+    # For SSE, we'd need to configure differently (future enhancement)
+    if transport == "sse":
+        console.print("[yellow]Warning:[/yellow] SSE transport not yet implemented, using stdio")
+
+    mcp_main()
 
 
 def main():
