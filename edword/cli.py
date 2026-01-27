@@ -382,6 +382,7 @@ def handle_version_mismatch(
             provider=config.llm.provider,
             model=config.llm.model,
             max_retries=3,
+            timeout=config.llm.timeout,
             verbose=False,
         )
 
@@ -874,6 +875,7 @@ def index_build(
         provider=config.llm.provider,
         model=config.llm.model,  # TODO: Use index-specific model when config supports it
         max_retries=3,
+        timeout=config.llm.timeout,  # Use configured timeout (default 120s)
         verbose=verbose,
     )
 

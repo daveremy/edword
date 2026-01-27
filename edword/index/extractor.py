@@ -34,7 +34,7 @@ class ExtractionConfig:
     provider: str = "claude"
     model: str = "haiku"
     max_retries: int = 3
-    timeout: int = 120
+    timeout: int = 300  # 5 minutes - large chapters can take a while
     verbose: bool = False
 
 
