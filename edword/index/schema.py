@@ -18,6 +18,12 @@ from typing import ClassVar, Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
+# --- Schema Version ---
+# Increment when schema changes require re-extraction of indices.
+# Old indices without this field default to version 0.
+INDEX_SCHEMA_VERSION = 1
+
+
 # --- Enums ---
 
 class Confidence(str, Enum):
@@ -242,6 +248,9 @@ class ChapterIndex(BaseModel):
     # Scene metadata
     pov_scene: POVScene = Field(default_factory=POVScene)
 
+    # Schema version (default 0 for legacy indices without this field)
+    schema_version: int = Field(default=0)
+
 
 # --- Accumulated Index ---
 
@@ -253,6 +262,9 @@ class AccumulatedIndex(BaseModel):
     book: str = Field(...)
     chapters_indexed: list[str] = Field(default_factory=list, description="List of chapter IDs included")
     last_updated: datetime = Field(default_factory=datetime.now)
+
+    # Schema version (default 0 for legacy indices without this field)
+    schema_version: int = Field(default=0)
 
     # Merged dimensions - same structure but accumulated across chapters
     characters: list[Character] = Field(default_factory=list)

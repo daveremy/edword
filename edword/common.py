@@ -20,8 +20,23 @@ class IndexError(EdwordError):
     pass
 
 
+class IndexVersionMismatch(EdwordError):
+    """Index schema version doesn't match current version."""
+
+    def __init__(self, book_id: str, index_version: int, current_version: int):
+        self.book_id = book_id
+        self.index_version = index_version
+        self.current_version = current_version
+        super().__init__(
+            f"Index for '{book_id}' uses schema v{index_version}, "
+            f"current is v{current_version}."
+        )
+
+
 def load_index(
-    project_root: Path, book: Optional[str] = None
+    project_root: Path,
+    book: Optional[str] = None,
+    check_version: bool = True,
 ) -> tuple[AccumulatedIndex, str]:
     """Load accumulated index, using discovery for default book.
 
@@ -30,13 +45,17 @@ def load_index(
     Args:
         project_root: Project root directory
         book: Book name (optional, defaults to first book)
+        check_version: Whether to check schema version (default True)
 
     Returns:
         Tuple of (AccumulatedIndex, book_id)
 
     Raises:
         IndexError: If no books found, book doesn't exist, or no index
+        IndexVersionMismatch: If index schema version doesn't match current version
     """
+    from .index.schema import INDEX_SCHEMA_VERSION
+
     project = discover_project(project_root)
 
     if not project.books:
@@ -58,5 +77,11 @@ def load_index(
 
     if index is None:
         raise IndexError(f"No index for '{book_id}'. Run 'edword index build' first.")
+
+    # Check schema version
+    if check_version:
+        index_version = getattr(index, 'schema_version', 0)  # Missing = v0
+        if index_version != INDEX_SCHEMA_VERSION:
+            raise IndexVersionMismatch(book_id, index_version, INDEX_SCHEMA_VERSION)
 
     return index, book_id

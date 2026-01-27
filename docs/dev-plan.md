@@ -16,8 +16,8 @@ AI-powered editorial memory for long-form fiction. The author never leaves their
 - **Project Discovery**: `edword info`, `edword init`
 - **LLM Providers**: Claude CLI, Gemini CLI support
 
-### Not Yet Implemented
-- CoVe verification for high-severity findings
+### Recently Added
+- CoVe verification for high-severity findings (`--verify` flag)
 
 ---
 
@@ -95,13 +95,49 @@ CLI remains valuable for manual usage, scripting, and AI assistants without MCP 
 - [x] Add to trilogy's `.mcp.json`
 - [x] Add unit tests (24 tests in test_mcp.py)
 
-### Phase 5: CoVe Verification
+### Phase 5: CoVe Verification (COMPLETE)
 Chain-of-Verification for high-severity findings.
 
+**Implementation:**
+- 4-step verification: load evidence, generate questions, answer independently, synthesize verdict
+- Verdicts: confirmed (real issue), dismissed (false positive), uncertain (need more context)
+- Error handling: returns uncertain on LLM failure instead of crashing
+
 **Tasks:**
-- [ ] Implement `edword/passes/verifier.py`
-- [ ] Add `--verify` flag to analyze command
-- [ ] Load text spans, generate questions, synthesize judgment
+- [x] Implement `edword/passes/verifier.py` - CoVeVerifier class
+- [x] Add `--verify`, `--verify-all`, `--no-verify`, `--verify-model` flags to analyze command
+- [x] Load text spans from chapter files based on finding location
+- [x] Generate verification questions, answer independently, synthesize judgment
+- [x] Add MCP tool `edword_verify_finding` for AI assistant integration
+- [x] Add prompt templates: `cove_generate_questions.md`, `cove_answer_question.md`, `cove_synthesize.md`
+- [x] Add tag parsers: `TAG_QUESTIONS`, `TAG_ANSWER`, `TAG_VERDICT` in parsing.py
+- [x] Extend Finding dataclass with optional `verification` field
+- [x] Update CLI serialization to include verification results in JSON output
+- [x] Add unit tests (28 tests in test_verifier.py)
+
+### Phase 6: Schema Versioning (COMPLETE)
+Automatic detection and handling of index schema changes after edword upgrades.
+
+**Implementation:**
+- `INDEX_SCHEMA_VERSION` constant (currently v1) in `edword/index/schema.py`
+- `schema_version` field on `ChapterIndex` and `AccumulatedIndex` (defaults to 0 for legacy)
+- `IndexVersionMismatch` exception raised when loading outdated indices
+- CLI prompts for rebuild with progress indicator; MCP returns `needs_rebuild: true`
+- `needs_reindex()` checks version even when file hash matches
+
+**Tasks:**
+- [x] Add `INDEX_SCHEMA_VERSION` constant and `schema_version` field to models
+- [x] Update `needs_reindex()` to check schema version
+- [x] Add `IndexVersionMismatch` exception and version check in `load_index()`
+- [x] Add `handle_version_mismatch()` CLI helper with progress indicator
+- [x] Update MCP `handle_error()` to return `needs_rebuild: true`
+- [x] Update `index show` to display Status column (Current/Outdated)
+- [x] Add unit tests (21 tests in test_version.py)
+
+**User experience:**
+- Positive messaging: "Edword has been upgraded with improved analysis"
+- Interactive rebuild prompt with time warning and progress indicator
+- `index show` displays version status without blocking
 
 ---
 

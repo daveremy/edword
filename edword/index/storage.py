@@ -12,7 +12,9 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from .schema import ChapterIndex, AccumulatedIndex
+from pydantic import ValidationError
+
+from .schema import ChapterIndex, AccumulatedIndex, INDEX_SCHEMA_VERSION
 from .extractor import compute_file_hash
 
 
@@ -193,7 +195,8 @@ class IndexStorage:
         return hashes.get(book_id, {}).get(chapter_id)
 
     def needs_reindex(self, book_id: str, chapter_id: str, source_path: Path) -> bool:
-        """Check if chapter needs re-indexing based on source file hash."""
+        """Check if chapter needs re-indexing based on source file hash AND schema version."""
+        # Check basic prerequisites
         if not self.chapter_exists(book_id, chapter_id):
             return True
 
@@ -201,8 +204,16 @@ class IndexStorage:
         if not stored_hash:
             return True
 
-        current_hash = compute_file_hash(source_path)
-        return stored_hash != current_hash
+        # Check if source file has changed
+        if stored_hash != compute_file_hash(source_path):
+            return True
+
+        # Check schema version (handles breaking changes)
+        try:
+            index = self.load_chapter_index(book_id, chapter_id)
+            return index is None or getattr(index, 'schema_version', 0) < INDEX_SCHEMA_VERSION
+        except ValidationError:
+            return True
 
     # --- Bulk Operations ---
 

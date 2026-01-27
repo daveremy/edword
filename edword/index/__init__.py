@@ -1,6 +1,8 @@
 """Index module for chapter fact extraction and accumulation."""
 
 from .schema import (
+    # Version
+    INDEX_SCHEMA_VERSION,
     # Enums
     Confidence,
     RelationshipDirection,
@@ -58,6 +60,8 @@ from .accumulator import (
 from .storage import IndexStorage
 
 __all__ = [
+    # Version
+    "INDEX_SCHEMA_VERSION",
     # Enums
     "Confidence",
     "RelationshipDirection",

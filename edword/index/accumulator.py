@@ -12,6 +12,7 @@ from typing import Optional
 from dataclasses import dataclass, field
 
 from .schema import (
+    INDEX_SCHEMA_VERSION,
     ChapterIndex,
     AccumulatedIndex,
     EntityList,
@@ -263,6 +264,7 @@ class Accumulator:
             book=self.book_id,
             chapters_indexed=self._chapters.copy(),
             last_updated=datetime.now(),
+            schema_version=INDEX_SCHEMA_VERSION,
             characters=list(self._characters.values()),
             timeline=self._timeline.copy(),
             locations=list(self._locations.values()),

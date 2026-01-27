@@ -13,6 +13,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from .config import load_config, EdwordConfig
 from .discovery import discover_project, get_book_by_name, ProjectStructure
 from .loaders import compile_manuscript, load_codex
+from .common import IndexVersionMismatch
 
 app = typer.Typer(
     name="edword",
@@ -215,6 +216,7 @@ def _serialize_finding(finding) -> dict:
         "location": finding.location,
         "context": finding.context,
         "suggestion": finding.suggestion,
+        "verification": finding.verification,  # CoVe result if verified
     }
 
 
@@ -305,6 +307,105 @@ def _error_json(message: str, json_output: bool) -> None:
         console.print(f"[red]Error:[/red] {message}")
 
 
+def handle_version_mismatch(
+    e: IndexVersionMismatch,
+    config: EdwordConfig,
+    book_name: str,
+    json_output: bool = False
+) -> None:
+    """Handle version mismatch with positive messaging. Rebuilds if approved, then exits."""
+    if json_output:
+        _output_json({
+            "status": "upgrade_available",
+            "message": "Edword has been upgraded with improved analysis capabilities.",
+            "action": f"edword index build --book {e.book_id}",
+            "book": e.book_id,
+            "index_version": e.index_version,
+            "current_version": e.current_version,
+        })
+        raise typer.Exit(1)
+
+    # Get chapter count for time estimate
+    from .discovery import discover_project, get_book_by_name
+    project = discover_project(config.project_root)
+    selected_book = get_book_by_name(project, book_name)
+    chapter_count = selected_book.chapter_count if selected_book else 0
+
+    console.print(Panel(
+        f"[cyan]Edword has been upgraded[/cyan] with improved analysis.\n\n"
+        f"Rebuild index for [bold]{e.book_id}[/bold] to use new features?\n\n"
+        f"[dim]This will re-analyze {chapter_count} chapter(s) using your LLM provider.\n"
+        f"Depending on your provider and chapter length, this may take a while.[/dim]",
+        title="Index Upgrade Available",
+        border_style="cyan",
+    ))
+
+    if typer.confirm("Rebuild now?", default=True):
+        # Import and run index build
+        from .index import IndexStorage, Accumulator, ExtractionConfig, extract_chapter
+
+        if not selected_book:
+            console.print(f"[red]Error:[/red] Book '{book_name}' not found")
+            raise typer.Exit(1)
+
+        storage = IndexStorage(config.project_root)
+        accumulator = Accumulator(selected_book.name)
+
+        extraction_config = ExtractionConfig(
+            provider=config.llm.provider,
+            model=config.llm.model,
+            max_retries=3,
+            verbose=False,
+        )
+
+        console.print(f"\n[cyan]Rebuilding index for {selected_book.name}...[/cyan]")
+
+        # Use progress bar for rebuild
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+            transient=False,
+        ) as progress:
+            errors = []
+            for i, chapter_path in enumerate(selected_book.chapters):
+                chapter_id = chapter_path.stem
+                task = progress.add_task(
+                    f"[cyan]Extracting {chapter_id}[/cyan] ({i+1}/{chapter_count})",
+                    total=None
+                )
+
+                entity_list = accumulator.get_entity_list()
+                result = extract_chapter(
+                    chapter_path=chapter_path,
+                    book_id=selected_book.name,
+                    chapter_id=chapter_id,
+                    entity_list=entity_list if entity_list.characters else None,
+                    config=extraction_config,
+                )
+
+                progress.remove_task(task)
+
+                if result.success:
+                    storage.save_chapter_index(result.index)
+                    accumulator.add_chapter(result.index)
+                    time_info = f" [dim]({result.timing.total_ms/1000:.1f}s)[/dim]" if result.timing else ""
+                    console.print(f"  [green]✓[/green] {chapter_id}{time_info}")
+                else:
+                    errors.append((chapter_id, result.error))
+                    console.print(f"  [red]✗[/red] {chapter_id}: {result.error}")
+
+        acc_result = accumulator.get_result()
+        storage.save_accumulated_index(acc_result.index)
+
+        if errors:
+            console.print(f"\n[yellow]Index rebuilt with {len(errors)} error(s). Please run your command again.[/yellow]")
+        else:
+            console.print("\n[green]Index rebuilt successfully. Please run your command again.[/green]")
+
+    raise typer.Exit(0)
+
+
 @app.command()
 def analyze(
     pass_names: Optional[List[str]] = typer.Argument(
@@ -321,6 +422,18 @@ def analyze(
     ),
     use_index: bool = typer.Option(
         False, "--index", "-i", help="Use accumulated index for analysis (faster, requires 'edword index build' first)"
+    ),
+    verify: bool = typer.Option(
+        False, "--verify", help="Verify ERROR findings with CoVe (Chain-of-Verification)"
+    ),
+    verify_all: bool = typer.Option(
+        False, "--verify-all", help="Verify ALL findings with CoVe, not just errors"
+    ),
+    no_verify: bool = typer.Option(
+        False, "--no-verify", help="Skip verification (fast mode)"
+    ),
+    verify_model: Optional[str] = typer.Option(
+        None, "--verify-model", help="Model to use for verification (default: from config or sonnet)"
     ),
     save: bool = typer.Option(
         False, "--save", "-s", help="Save report to file"
@@ -414,12 +527,23 @@ def analyze(
     accumulated_index = None
     if use_index:
         from .index.storage import IndexStorage
+        from .index.schema import INDEX_SCHEMA_VERSION
         storage = IndexStorage(config.project_root, str(config.paths.index))
         accumulated_index = storage.load_accumulated_index(selected_book.name)
-        if not json_output:
-            if accumulated_index:
+        if accumulated_index:
+            # Check schema version
+            index_version = getattr(accumulated_index, 'schema_version', 0)
+            if index_version != INDEX_SCHEMA_VERSION:
+                handle_version_mismatch(
+                    IndexVersionMismatch(selected_book.name, index_version, INDEX_SCHEMA_VERSION),
+                    config,
+                    selected_book.name,
+                    json_output
+                )
+            if not json_output:
                 console.print(f"[dim]Index: {len(accumulated_index.characters)} characters, {len(accumulated_index.timeline)} events[/dim]")
-            else:
+        else:
+            if not json_output:
                 console.print(f"[yellow]Warning:[/yellow] No index found for {selected_book.name}. Run 'edword index build' first.")
 
     # Determine which passes to run
@@ -447,6 +571,68 @@ def analyze(
         verbose=verbose,
         index=accumulated_index,
     )
+
+    # Run CoVe verification if requested
+    if (verify or verify_all) and not no_verify:
+        from .passes.verifier import CoVeVerifier, VerificationVerdict
+        from .passes.base import Severity
+
+        # Resolve model from flag > config > default
+        resolved_model = (
+            verify_model
+            or getattr(config.llm, 'recursive_model', None)
+            or config.llm.model
+            or "sonnet"
+        )
+
+        verifier = CoVeVerifier(
+            provider=config.llm.provider,
+            model=resolved_model,
+        )
+
+        if not json_output:
+            console.print(f"\n[bold]Verifying findings with CoVe...[/bold] (model: {resolved_model})")
+
+        verified_count = 0
+        for result in results:
+            if result.error:
+                continue
+
+            # Select which findings to verify
+            if verify_all:
+                findings_to_verify = result.findings
+            else:
+                findings_to_verify = result.errors  # Only ERROR severity
+
+            for finding in findings_to_verify:
+                # Show spinner for interactive mode
+                if not json_output:
+                    console.print(f"  [dim]Verifying: {finding.message[:50]}...[/dim]", end="\r")
+
+                verification = verifier.verify(finding, selected_book)
+                verified_count += 1
+
+                # Attach verification to finding
+                finding.verification = {
+                    "verdict": verification.verdict.value,
+                    "confidence": verification.confidence,
+                    "explanation": verification.explanation,
+                }
+
+                if not json_output:
+                    verdict_color = {
+                        "confirmed": "red",
+                        "dismissed": "green",
+                        "uncertain": "yellow",
+                    }.get(verification.verdict.value, "dim")
+                    # Clear spinner line and print result
+                    console.print(
+                        f"  [{verdict_color}]{verification.verdict.value.upper()}[/{verdict_color}] "
+                        f"({verification.confidence}) - {finding.message[:60]}   "
+                    )
+
+        if not json_output and verified_count > 0:
+            console.print(f"[dim]Verified {verified_count} finding(s)[/dim]")
 
     # JSON output
     if json_output:
@@ -921,13 +1107,26 @@ def index_show(
     ),
 ):
     """Show index summary or details."""
-    from .index import IndexStorage
+    from .index import IndexStorage, INDEX_SCHEMA_VERSION
 
     config, project = get_config_and_project(config_path)
     storage = IndexStorage(config.project_root)
 
     # Get stats
     stats = storage.get_stats(book)
+
+    # Check version for each book (don't block for summary view)
+    def get_book_version(book_stat: dict) -> tuple[Optional[int], bool]:
+        """Return (schema_version, is_current) for a book."""
+        if not book_stat.get("has_accumulated"):
+            return (None, True)
+        acc_index = storage.load_accumulated_index(book_stat["book_id"])
+        if not acc_index:
+            return (0, False)
+        version = getattr(acc_index, 'schema_version', 0)
+        return (version, version == INDEX_SCHEMA_VERSION)
+
+    book_versions = {b["book_id"]: get_book_version(b) for b in stats.get("books", [])}
 
     if not stats["books"]:
         if json_output:
@@ -942,6 +1141,16 @@ def index_show(
         if not book_id:
             _error_json("Specify --book", json_output)
             raise typer.Exit(1)
+
+        # Check version before showing chapter details
+        version, is_current = book_versions.get(book_id, (None, True))
+        if version is not None and not is_current:
+            handle_version_mismatch(
+                IndexVersionMismatch(book_id, version, INDEX_SCHEMA_VERSION),
+                config,
+                book_id,
+                json_output
+            )
 
         index = storage.load_chapter_index(book_id, chapter)
         if not index:
@@ -1009,11 +1218,14 @@ def index_show(
                         "chapters": b["chapters"],
                         "has_accumulated": b["has_accumulated"],
                         "size_kb": round(b["size_bytes"] / 1024, 1),
+                        "schema_version": book_versions.get(b["book_id"], (None, True))[0],
+                        "version_current": book_versions.get(b["book_id"], (None, True))[1],
                     }
                     for b in stats["books"]
                 ],
                 "total_chapters": stats["total_chapters"],
                 "total_size_kb": round(stats["total_size_bytes"] / 1024, 1),
+                "current_schema_version": INDEX_SCHEMA_VERSION,
             })
             return
 
@@ -1022,18 +1234,37 @@ def index_show(
         table.add_column("Book", style="cyan")
         table.add_column("Chapters", justify="right")
         table.add_column("Accumulated", justify="center")
+        table.add_column("Status", justify="center")
         table.add_column("Size")
 
+        has_outdated = False
         for book_stats in stats["books"]:
+            book_id = book_stats["book_id"]
+            _, is_current = book_versions.get(book_id, (None, True))
+            has_accumulated = book_stats["has_accumulated"]
+
+            # Determine status
+            if not has_accumulated:
+                status = "[dim]No index[/dim]"
+            elif is_current:
+                status = "[green]Current[/green]"
+            else:
+                status = "[yellow]Outdated[/yellow]"
+                has_outdated = True
+
             table.add_row(
-                book_stats["book_id"],
+                book_id,
                 str(len(book_stats["chapters"])),
-                "[green]Yes[/green]" if book_stats["has_accumulated"] else "[dim]No[/dim]",
+                "[green]Yes[/green]" if has_accumulated else "[dim]No[/dim]",
+                status,
                 f"{book_stats['size_bytes'] / 1024:.1f}KB",
             )
 
         console.print(table)
         console.print(f"\n[dim]Total: {stats['total_chapters']} chapters, {stats['total_size_bytes'] / 1024:.1f}KB[/dim]")
+
+        if has_outdated:
+            console.print(f"\n[yellow]Some indices are outdated.[/yellow] Run [cyan]edword index build[/cyan] to upgrade.")
 
 
 @index_app.command("clear")
@@ -1091,6 +1322,8 @@ def query_character_cmd(
 
     try:
         result = query_character(config.project_root, name, book)
+    except IndexVersionMismatch as e:
+        handle_version_mismatch(e, config, book or e.book_id, json_output)
     except QueryError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -1154,6 +1387,8 @@ def query_timeline_cmd(
 
     try:
         result = query_timeline(config.project_root, book, chapters, limit)
+    except IndexVersionMismatch as e:
+        handle_version_mismatch(e, config, book or e.book_id, json_output)
     except (QueryError, ValueError) as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -1200,6 +1435,8 @@ def query_location_cmd(
 
     try:
         result = query_location(config.project_root, name, book)
+    except IndexVersionMismatch as e:
+        handle_version_mismatch(e, config, book or e.book_id, json_output)
     except QueryError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -1247,6 +1484,8 @@ def query_artifact_cmd(
 
     try:
         result = query_artifact(config.project_root, name, book)
+    except IndexVersionMismatch as e:
+        handle_version_mismatch(e, config, book or e.book_id, json_output)
     except QueryError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -1292,6 +1531,8 @@ def query_world_cmd(
 
     try:
         result = query_world(config.project_root, term, book, as_of)
+    except IndexVersionMismatch as e:
+        handle_version_mismatch(e, config, book or e.book_id, json_output)
     except QueryError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -1341,6 +1582,8 @@ def query_search_cmd(
 
     try:
         result = query_search(config.project_root, query, book, limit)
+    except IndexVersionMismatch as e:
+        handle_version_mismatch(e, config, book or e.book_id, json_output)
     except QueryError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)
@@ -1453,6 +1696,8 @@ def check_cmd(
 
     try:
         result = check_text(config.project_root, text, book)
+    except IndexVersionMismatch as e:
+        handle_version_mismatch(e, config, book or e.book_id, json_output)
     except CheckError as e:
         console.print(f"[red]Error:[/red] {e}")
         raise typer.Exit(1)

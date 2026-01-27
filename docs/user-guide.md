@@ -357,6 +357,33 @@ edword index build --book book1
 
 Run: `edword index build`
 
+### "Index upgrade available" (after updating edword)
+
+When you update edword, the index schema may have changed. You'll see:
+
+```
+╭─────────────────────────────────────╮
+│       Index Upgrade Available       │
+├─────────────────────────────────────┤
+│ Edword has been upgraded with       │
+│ improved analysis.                  │
+│                                     │
+│ Rebuild index for book1?            │
+╰─────────────────────────────────────╯
+```
+
+Choose "Yes" to rebuild, or run manually:
+```bash
+edword index build
+```
+
+You can also check index status to see which books need upgrading:
+```bash
+edword index show
+```
+
+Books with `[Outdated]` status need rebuilding.
+
 ### "Too many false positives"
 
 Run with verification: `edword analyze --verify`

@@ -376,6 +376,33 @@ You: "I noticed the index was built 2 weeks ago. If you've added new
  This will take a few minutes for the first run."
 ```
 
+### Index Needs Upgrade (Schema Version Mismatch)
+
+When edword is upgraded, the index schema may change. Tools will return a special error:
+
+```json
+{
+  "error": true,
+  "error_type": "IndexVersionMismatch",
+  "message": "Edword has been upgraded with improved analysis capabilities.",
+  "needs_rebuild": true,
+  "book": "book1",
+  "action": "Run 'edword index build --book book1' to rebuild"
+}
+```
+
+**How to handle:**
+```
+"The edword index needs to be rebuilt to use the latest analysis features.
+ This happens after edword upgrades. Please run:
+
+ $ edword index build
+
+ This will re-analyze all chapters with the improved extraction."
+```
+
+The `needs_rebuild: true` flag lets you detect this programmatically and suggest the rebuild to the author.
+
 ### Character Not in Index
 
 ```

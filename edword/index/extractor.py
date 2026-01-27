@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 
 from ..prompts import render_prompt
 from ..llm import call_model, extract_index
-from .schema import ChapterIndex, EntityList
+from .schema import ChapterIndex, EntityList, INDEX_SCHEMA_VERSION
 from .validation import (
     validate_with_retry,
     coerce_to_schema,
@@ -200,6 +200,7 @@ def extract_chapter(
         data["source_path"] = str(chapter_path)
         data["source_hash"] = source_hash
         data["extracted_at"] = datetime.now().isoformat()
+        data["schema_version"] = INDEX_SCHEMA_VERSION
 
         return data
 
@@ -329,6 +330,7 @@ def extract_chapter_simple(
         data["source_path"] = source_path
         data["source_hash"] = source_hash
         data["extracted_at"] = datetime.now().isoformat()
+        data["schema_version"] = INDEX_SCHEMA_VERSION
 
         return data
 

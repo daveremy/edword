@@ -130,7 +130,7 @@ edword index build --book book1
 # Force rebuild (ignore cache)
 edword index build --force
 
-# Show index summary
+# Show index summary (includes version status: Current/Outdated)
 edword index show
 
 # Show specific chapter's index
@@ -139,6 +139,8 @@ edword index show --chapter 5
 # Clear all index files
 edword index clear
 ```
+
+After updating edword, the index may need rebuilding. Run `edword index show` to check status, or edword will prompt you automatically when you run a query.
 
 ### Analysis Commands (Run Editorial Passes)
 

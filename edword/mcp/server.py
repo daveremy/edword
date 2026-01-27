@@ -10,7 +10,7 @@ from typing import Any, Optional
 
 from fastmcp import FastMCP
 
-from ..common import EdwordError
+from ..common import EdwordError, IndexVersionMismatch
 from ..config import find_config, load_config, EdwordConfig
 from ..discovery import discover_project, get_book_by_name
 from ..index.storage import IndexStorage
@@ -94,6 +94,17 @@ def handle_error(e: Exception) -> dict[str, Any]:
     Returns:
         Dict with error info, safe for JSON serialization
     """
+    if isinstance(e, IndexVersionMismatch):
+        return {
+            "error": True,
+            "error_type": "IndexVersionMismatch",
+            "message": "Edword has been upgraded with improved analysis capabilities.",
+            "needs_rebuild": True,
+            "book": e.book_id,
+            "index_version": e.index_version,
+            "current_version": e.current_version,
+            "action": f"Run 'edword index build --book {e.book_id}' to rebuild",
+        }
     return {
         "error": True,
         "error_type": type(e).__name__,
@@ -309,6 +320,69 @@ def edword_check_text(
     try:
         root = get_project_root(project_root)
         return check_text(root, text, book)
+    except EdwordError as e:
+        return handle_error(e)
+    except Exception as e:
+        return handle_error(e)
+
+
+@mcp.tool
+def edword_verify_finding(
+    finding_message: str,
+    finding_location: str,
+    book: Optional[str] = None,
+    project_root: Optional[str] = None,
+) -> dict[str, Any]:
+    """Verify a specific finding using Chain-of-Verification (CoVe).
+
+    Runs a 4-step verification process to determine if a finding is real or
+    a false positive:
+    1. Load relevant manuscript evidence
+    2. Generate verification questions
+    3. Answer questions independently
+    4. Synthesize final verdict
+
+    Args:
+        finding_message: The finding message to verify
+        finding_location: Location in manuscript (e.g., "Chapters: 8, 11b")
+        book: Book name (optional, defaults to first book)
+        project_root: Project root path (optional, uses env/auto-discover)
+
+    Returns:
+        Verification result with verdict, confidence, and explanation.
+        Verdicts: confirmed (real issue), dismissed (false positive), uncertain
+    """
+    from ..passes.verifier import CoVeVerifier
+    from ..passes.base import Finding, Severity
+
+    try:
+        config = get_config(project_root)
+        root = config.project_root or Path.cwd()
+        project = discover_project(root)
+
+        # Resolve book
+        selected_book = get_book_by_name(project, book) if book else (
+            project.books[0] if project.books else None
+        )
+        if not selected_book:
+            msg = f"Book '{book}' not found" if book else "No books found"
+            return {"error": True, "message": msg}
+
+        # Resolve model from config
+        resolved_model = getattr(config.llm, 'recursive_model', None) or config.llm.model or "sonnet"
+
+        verifier = CoVeVerifier(provider=config.llm.provider, model=resolved_model)
+        finding = Finding(severity=Severity.ERROR, message=finding_message, location=finding_location)
+        result = verifier.verify(finding, selected_book)
+
+        return {
+            "verdict": result.verdict.value,
+            "confidence": result.confidence,
+            "explanation": result.explanation,
+            "questions_asked": len(result.questions),
+            "evidence_excerpt": result.evidence_excerpt[:200] if result.evidence_excerpt else "",
+            "book": selected_book.name,
+        }
     except EdwordError as e:
         return handle_error(e)
     except Exception as e:
