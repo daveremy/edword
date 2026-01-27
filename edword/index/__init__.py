@@ -3,6 +3,8 @@
 from .schema import (
     # Version
     INDEX_SCHEMA_VERSION,
+    # Metadata
+    ExtractionMetadata,
     # Enums
     Confidence,
     RelationshipDirection,
@@ -62,6 +64,8 @@ from .storage import IndexStorage
 __all__ = [
     # Version
     "INDEX_SCHEMA_VERSION",
+    # Metadata
+    "ExtractionMetadata",
     # Enums
     "Confidence",
     "RelationshipDirection",

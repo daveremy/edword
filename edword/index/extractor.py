@@ -15,7 +15,8 @@ from dataclasses import dataclass, field
 
 from ..prompts import render_prompt
 from ..llm import call_model, extract_index
-from .schema import ChapterIndex, EntityList, INDEX_SCHEMA_VERSION
+from .schema import ChapterIndex, EntityList, INDEX_SCHEMA_VERSION, ExtractionMetadata
+from .. import __version__ as edword_version
 from .validation import (
     validate_with_retry,
     coerce_to_schema,
@@ -201,6 +202,11 @@ def extract_chapter(
         data["source_hash"] = source_hash
         data["extracted_at"] = datetime.now().isoformat()
         data["schema_version"] = INDEX_SCHEMA_VERSION
+        data["extraction_metadata"] = {
+            "provider": config.provider,
+            "model": config.model,
+            "edword_version": edword_version,
+        }
 
         return data
 
@@ -331,6 +337,11 @@ def extract_chapter_simple(
         data["source_hash"] = source_hash
         data["extracted_at"] = datetime.now().isoformat()
         data["schema_version"] = INDEX_SCHEMA_VERSION
+        data["extraction_metadata"] = {
+            "provider": config.provider,
+            "model": config.model,
+            "edword_version": edword_version,
+        }
 
         return data
 

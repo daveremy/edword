@@ -21,7 +21,16 @@ from pydantic import BaseModel, ConfigDict, Field
 # --- Schema Version ---
 # Increment when schema changes require re-extraction of indices.
 # Old indices without this field default to version 0.
-INDEX_SCHEMA_VERSION = 1
+INDEX_SCHEMA_VERSION = 2
+
+
+# --- Extraction Metadata ---
+
+class ExtractionMetadata(BaseModel):
+    """Metadata about how a chapter was extracted."""
+    provider: str = Field(..., description="LLM provider used (e.g., 'claude', 'gemini')")
+    model: str = Field(..., description="Model name/ID used for extraction")
+    edword_version: str = Field(default="unknown", description="Version of edword that performed extraction")
 
 
 # --- Enums ---
@@ -250,6 +259,9 @@ class ChapterIndex(BaseModel):
 
     # Schema version (default 0 for legacy indices without this field)
     schema_version: int = Field(default=0)
+
+    # Extraction metadata (optional for legacy indices)
+    extraction_metadata: Optional[ExtractionMetadata] = Field(default=None)
 
 
 # --- Accumulated Index ---

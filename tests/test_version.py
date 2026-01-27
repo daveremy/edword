@@ -23,9 +23,9 @@ class TestVersionConstant:
         assert isinstance(INDEX_SCHEMA_VERSION, int)
         assert INDEX_SCHEMA_VERSION > 0
 
-    def test_current_version_is_1(self):
-        """Current version should be 1."""
-        assert INDEX_SCHEMA_VERSION == 1
+    def test_current_version_is_2(self):
+        """Current version should be 2 (added extraction_metadata)."""
+        assert INDEX_SCHEMA_VERSION == 2
 
 
 # --- Schema Field Tests ---
