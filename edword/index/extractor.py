@@ -14,9 +14,13 @@ from typing import Optional, Callable
 from dataclasses import dataclass, field
 
 from ..prompts import render_prompt
-from ..llm import call_model, extract_index
+from ..llm import call_model, extract_index, ProviderTimeout, RateLimitError
 from .schema import ChapterIndex, EntityList, INDEX_SCHEMA_VERSION, ExtractionMetadata
 from .. import __version__ as edword_version
+
+# Timeout retry settings
+MAX_TIMEOUT_RETRIES = 2
+TIMEOUT_BACKOFF_SECONDS = [30, 60]  # Wait times between retries
 from .validation import (
     validate_with_retry,
     coerce_to_schema,
@@ -159,18 +163,39 @@ def extract_chapter(
 
     def call_llm(p: str) -> str:
         nonlocal raw_response
-        llm_start = time.perf_counter()
-        response = call_model(
-            config.provider,
-            p,
-            model=config.model,
-            timeout=config.timeout,
-            use_cache=False,  # Don't cache extraction calls
-        )
-        timing.llm_calls_ms += (time.perf_counter() - llm_start) * 1000
-        timing.llm_call_count += 1
-        raw_response = response
-        return response
+        last_error = None
+
+        for attempt in range(MAX_TIMEOUT_RETRIES + 1):
+            try:
+                llm_start = time.perf_counter()
+                response = call_model(
+                    config.provider,
+                    p,
+                    model=config.model,
+                    timeout=config.timeout,
+                    use_cache=False,  # Don't cache extraction calls
+                )
+                timing.llm_calls_ms += (time.perf_counter() - llm_start) * 1000
+                timing.llm_call_count += 1
+                raw_response = response
+                return response
+            except ProviderTimeout as e:
+                last_error = e
+                timing.llm_calls_ms += (time.perf_counter() - llm_start) * 1000
+                timing.llm_call_count += 1
+                if attempt < MAX_TIMEOUT_RETRIES:
+                    wait_time = TIMEOUT_BACKOFF_SECONDS[attempt]
+                    if config.verbose:
+                        print(f"  Timeout, retrying in {wait_time}s (attempt {attempt + 2}/{MAX_TIMEOUT_RETRIES + 1})...")
+                    time.sleep(wait_time)
+                else:
+                    raise  # Re-raise after all retries exhausted
+            except RateLimitError:
+                timing.llm_calls_ms += (time.perf_counter() - llm_start) * 1000
+                timing.llm_call_count += 1
+                raise  # Always re-raise rate limit errors (don't retry)
+
+        raise last_error  # Should not reach here, but just in case
 
     def parse_response(response: str) -> dict:
         """Parse LLM response to dict, extracting from tags."""
@@ -245,6 +270,9 @@ def extract_chapter(
             timing=timing,
         )
 
+    except RateLimitError:
+        # Re-raise rate limit errors so caller can halt
+        raise
     except IndexValidationError as e:
         timing.total_ms = (time.perf_counter() - total_start) * 1000
         return ExtractionResult(

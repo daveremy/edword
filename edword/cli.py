@@ -299,6 +299,33 @@ def _serialize_contradiction(c) -> dict:
     }
 
 
+def _save_partial_results(storage, accumulator, results, chapters_to_load, selected_book, json_output, errors):
+    """Save partial results when build is interrupted (e.g., rate limit)."""
+    # Load cached chapters into accumulator
+    for i, chapter_id in chapters_to_load:
+        existing = storage.load_chapter_index(selected_book.name, chapter_id)
+        if existing:
+            accumulator.add_chapter(existing)
+
+    # Save any successfully extracted chapters
+    for i, (status, data) in results.items():
+        if status == "extracted" and data.success:
+            storage.save_chapter_index(data.index)
+            accumulator.add_chapter(data.index)
+
+    # Save accumulated index (partial)
+    acc_result = accumulator.get_result()
+    storage.save_accumulated_index(acc_result.index)
+
+    if json_output:
+        _output_json({
+            "status": "rate_limited",
+            "message": "Rate limit hit. Run again to continue.",
+            "book": selected_book.name,
+            "chapters_saved": len([r for r in results.values() if r[0] == "extracted" and r[1].success]),
+        })
+
+
 def _error_json(message: str, json_output: bool) -> None:
     """Output error message, as JSON if requested."""
     if json_output:
@@ -814,8 +841,9 @@ def index_build(
     import concurrent.futures
     from .index import (
         IndexStorage, Accumulator, ExtractionConfig,
-        extract_chapter, EntityList
+        extract_chapter, EntityList, INDEX_SCHEMA_VERSION
     )
+    from .llm import RateLimitError
 
     build_start = time.perf_counter()
     config, project = get_config_and_project(config_path)
@@ -902,6 +930,7 @@ def index_build(
         if not json_output:
             console.print(f"[cyan]Extracting {len(chapters_to_extract)} chapters with {workers} workers...[/cyan]")
 
+        rate_limit_hit = False
         with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as executor:
             # Submit all extraction tasks
             futures = {}
@@ -944,6 +973,15 @@ def index_build(
                                 )
                             else:
                                 console.print(f"  [red]✗[/red] {chapter_id}: {result.error}")
+                except RateLimitError as e:
+                    rate_limit_hit = True
+                    if not json_output:
+                        console.print(f"\n[red bold]Rate limit hit![/red bold] Halting build.")
+                        console.print(f"[dim]Run 'edword index build' again to continue.[/dim]")
+                    # Cancel remaining futures
+                    for f in futures:
+                        f.cancel()
+                    break
                 except Exception as e:
                     if not json_output:
                         console.print(f"  [red]✗[/red] {chapter_id}: Exception: {e}")
@@ -951,25 +989,35 @@ def index_build(
                     chapter_results_json.append(
                         _make_chapter_result(chapter_id, success=False, status="exception", error=str(e))
                     )
+
+        if rate_limit_hit:
+            # Early exit for rate limit - save what we have
+            _save_partial_results(storage, accumulator, results, chapters_to_load, selected_book, json_output, errors)
+            raise typer.Exit(1)
     else:
         # Sequential extraction (original behavior)
+        rate_limit_hit = False
         if json_output:
             # No progress bar for JSON
             for i, chapter_id, chapter_path in chapters_to_extract:
                 entity_list = accumulator.get_entity_list()
-                result = extract_chapter(
-                    chapter_path=chapter_path,
-                    book_id=selected_book.name,
-                    chapter_id=chapter_id,
-                    entity_list=entity_list if entity_list.characters else None,
-                    config=extraction_config,
-                )
-                results[i] = ("extracted", result)
-                chapter_results_json.append(_extraction_result_to_json(chapter_id, result))
-                # For sequential mode, accumulate immediately to build entity list
-                if result.success:
-                    storage.save_chapter_index(result.index)
-                    accumulator.add_chapter(result.index)
+                try:
+                    result = extract_chapter(
+                        chapter_path=chapter_path,
+                        book_id=selected_book.name,
+                        chapter_id=chapter_id,
+                        entity_list=entity_list if entity_list.characters else None,
+                        config=extraction_config,
+                    )
+                    results[i] = ("extracted", result)
+                    chapter_results_json.append(_extraction_result_to_json(chapter_id, result))
+                    # For sequential mode, accumulate immediately to build entity list
+                    if result.success:
+                        storage.save_chapter_index(result.index)
+                        accumulator.add_chapter(result.index)
+                except RateLimitError:
+                    rate_limit_hit = True
+                    break
         else:
             with Progress(
                 SpinnerColumn(),
@@ -985,13 +1033,18 @@ def index_build(
                     # Get entity list from accumulated so far (sequential mode only)
                     entity_list = accumulator.get_entity_list()
 
-                    result = extract_chapter(
-                        chapter_path=chapter_path,
-                        book_id=selected_book.name,
-                        chapter_id=chapter_id,
-                        entity_list=entity_list if entity_list.characters else None,
-                        config=extraction_config,
-                    )
+                    try:
+                        result = extract_chapter(
+                            chapter_path=chapter_path,
+                            book_id=selected_book.name,
+                            chapter_id=chapter_id,
+                            entity_list=entity_list if entity_list.characters else None,
+                            config=extraction_config,
+                        )
+                    except RateLimitError:
+                        progress.remove_task(task)
+                        rate_limit_hit = True
+                        break
 
                     progress.remove_task(task)
                     results[i] = ("extracted", result)
@@ -1015,7 +1068,16 @@ def index_build(
                         else:
                             console.print(f"  [red]✗[/red] {chapter_id}: {result.error}")
 
+        if rate_limit_hit:
+            if not json_output:
+                console.print(f"\n[red bold]Rate limit hit![/red bold] Halting build.")
+                console.print(f"[dim]Run 'edword index build' again to continue.[/dim]")
+            # Save what we have and exit
+            _save_partial_results(storage, accumulator, results, chapters_to_load, selected_book, json_output, errors)
+            raise typer.Exit(1)
+
     # Accumulate all results in chapter order (for non-JSON sequential mode, already done above)
+    # Also validate that all chapters have correct schema version
     for i in range(len(selected_book.chapters)):
         if i not in results:
             continue
@@ -1024,7 +1086,13 @@ def index_build(
         chapter_id = selected_book.chapters[i].stem
 
         if status == "loaded":
-            # Already loaded from cache
+            # Verify loaded chapter has correct schema version
+            chapter_version = getattr(data, 'schema_version', 0)
+            if chapter_version < INDEX_SCHEMA_VERSION:
+                errors.append((chapter_id, f"Outdated schema v{chapter_version} (expected v{INDEX_SCHEMA_VERSION})"))
+                if not json_output:
+                    console.print(f"  [red]✗[/red] {chapter_id}: outdated schema v{chapter_version}")
+                continue
             accumulator.add_chapter(data)
         elif status == "extracted":
             result = data
@@ -1058,6 +1126,7 @@ def index_build(
             "chapters_indexed": chapters_indexed,
             "chapters_skipped": chapters_skipped,
             "errors": len(errors),
+            "error_details": [{"chapter": cid, "error": err} for cid, err in errors],
             "contradictions": len(acc_result.contradictions),
             "contradiction_details": [_serialize_contradiction(c) for c in acc_result.contradictions],
             "total_time_ms": round(build_time_ms, 1),
@@ -1081,6 +1150,11 @@ def index_build(
             title="Index Build Complete",
             border_style="yellow",
         ))
+        # Report which chapters failed
+        console.print("\n[red bold]Failed chapters:[/red bold]")
+        for chapter_id, error in errors:
+            console.print(f"  • {chapter_id}: [dim]{error}[/dim]")
+        console.print("\n[dim]Run 'edword index build' again to retry failed chapters.[/dim]")
     else:
         console.print(Panel(
             f"[green]{chapters_indexed}[/green] indexed  "

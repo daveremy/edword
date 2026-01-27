@@ -1,6 +1,13 @@
 """LLM providers and RLM implementation."""
 
-from .providers import call_claude, call_gemini, call_model
+from .providers import (
+    call_claude,
+    call_gemini,
+    call_model,
+    ProviderError,
+    ProviderTimeout,
+    RateLimitError,
+)
 from .rlm import RLM, RLMError, MaxIterationsError
 from .parsing import (
     extract_index,
@@ -13,6 +20,9 @@ __all__ = [
     "call_claude",
     "call_gemini",
     "call_model",
+    "ProviderError",
+    "ProviderTimeout",
+    "RateLimitError",
     "RLM",
     "RLMError",
     "MaxIterationsError",

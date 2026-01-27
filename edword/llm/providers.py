@@ -23,6 +23,16 @@ class ProviderError(Exception):
     pass
 
 
+class ProviderTimeout(ProviderError):
+    """LLM call timed out - may be retried."""
+    pass
+
+
+class RateLimitError(ProviderError):
+    """Rate limit hit - should halt, not retry."""
+    pass
+
+
 def _cache_key(provider: str, model: str, prompt: str, context_hash: Optional[str] = None) -> str:
     """Generate cache key from provider, model, prompt, and optional context hash.
 
@@ -123,6 +133,10 @@ def call_claude(
         )
 
         if result.returncode != 0:
+            stderr = result.stderr.lower()
+            # Detect rate limit errors
+            if "rate" in stderr or "limit" in stderr or "429" in stderr or "too many" in stderr:
+                raise RateLimitError(f"Claude rate limit: {result.stderr}")
             raise ProviderError(f"Claude CLI error: {result.stderr}")
 
         response = result.stdout.strip()
@@ -134,7 +148,7 @@ def call_claude(
         return response
 
     except subprocess.TimeoutExpired:
-        raise ProviderError(f"Claude CLI timed out after {timeout}s")
+        raise ProviderTimeout(f"Claude CLI timed out after {timeout}s")
 
 
 def call_gemini(
@@ -211,6 +225,10 @@ def call_gemini(
             )
 
         if result.returncode != 0:
+            stderr = result.stderr.lower()
+            # Detect rate limit errors
+            if "rate" in stderr or "limit" in stderr or "429" in stderr or "quota" in stderr:
+                raise RateLimitError(f"Gemini rate limit: {result.stderr}")
             raise ProviderError(f"Gemini CLI error: {result.stderr}")
 
         # Filter out warning/loading lines from gemini output
@@ -233,7 +251,7 @@ def call_gemini(
         return response
 
     except subprocess.TimeoutExpired:
-        raise ProviderError(f"Gemini CLI timed out after {timeout}s")
+        raise ProviderTimeout(f"Gemini CLI timed out after {timeout}s")
 
 
 def call_model(
