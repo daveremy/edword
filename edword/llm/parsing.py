@@ -15,6 +15,9 @@ from dataclasses import dataclass
 # Tag names used in prompts
 TAG_INDEX = "EDWORD_INDEX"
 TAG_VERIFY = "EDWORD_VERIFY"
+TAG_QUESTIONS = "EDWORD_QUESTIONS"
+TAG_ANSWER = "EDWORD_ANSWER"
+TAG_VERDICT = "EDWORD_VERDICT"
 
 
 @dataclass
@@ -122,6 +125,33 @@ def extract_verification(response: str) -> ParseResult:
     Convenience wrapper for extract_json with VERIFY tag.
     """
     return extract_json(response, TAG_VERIFY)
+
+
+def extract_questions(response: str) -> ParseResult:
+    """Extract questions list from <EDWORD_QUESTIONS> tags.
+
+    Convenience wrapper for extract_json with QUESTIONS tag.
+    Used by CoVe verification to extract generated questions.
+    """
+    return extract_json(response, TAG_QUESTIONS)
+
+
+def extract_answer(response: str) -> ParseResult:
+    """Extract answer text from <EDWORD_ANSWER> tags.
+
+    Convenience wrapper for extract_tagged_content with ANSWER tag.
+    Used by CoVe verification to extract question answers.
+    """
+    return extract_tagged_content(response, TAG_ANSWER)
+
+
+def extract_verdict(response: str) -> ParseResult:
+    """Extract verdict data from <EDWORD_VERDICT> tags.
+
+    Convenience wrapper for extract_json with VERDICT tag.
+    Used by CoVe verification to extract final judgment.
+    """
+    return extract_json(response, TAG_VERDICT)
 
 
 def fallback_json_extraction(response: str) -> ParseResult:

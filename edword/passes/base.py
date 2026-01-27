@@ -21,6 +21,7 @@ class Finding:
     location: Optional[str] = None  # e.g., "Chapter 8, line 42"
     context: Optional[str] = None   # Relevant text snippet
     suggestion: Optional[str] = None  # How to fix
+    verification: Optional[Dict[str, Any]] = None  # CoVe result: {verdict, confidence, explanation}
 
     def __str__(self) -> str:
         parts = [f"[{self.severity.value.upper()}] {self.message}"]
