@@ -163,11 +163,10 @@ def extract_chapter(
 
     def call_llm(p: str) -> str:
         nonlocal raw_response
-        last_error = None
 
         for attempt in range(MAX_TIMEOUT_RETRIES + 1):
+            llm_start = time.perf_counter()
             try:
-                llm_start = time.perf_counter()
                 response = call_model(
                     config.provider,
                     p,
@@ -179,8 +178,7 @@ def extract_chapter(
                 timing.llm_call_count += 1
                 raw_response = response
                 return response
-            except ProviderTimeout as e:
-                last_error = e
+            except ProviderTimeout:
                 timing.llm_calls_ms += (time.perf_counter() - llm_start) * 1000
                 timing.llm_call_count += 1
                 if attempt < MAX_TIMEOUT_RETRIES:
@@ -195,7 +193,9 @@ def extract_chapter(
                 timing.llm_call_count += 1
                 raise  # Always re-raise rate limit errors (don't retry)
 
-        raise last_error  # Should not reach here, but just in case
+        # Loop always returns (success) or raises (timeout/rate limit)
+        # This is unreachable but satisfies type checker
+        assert False, "Unreachable"
 
     def parse_response(response: str) -> dict:
         """Parse LLM response to dict, extracting from tags."""

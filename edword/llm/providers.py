@@ -33,6 +33,26 @@ class RateLimitError(ProviderError):
     pass
 
 
+def _is_rate_limit_error(stderr: str) -> bool:
+    """Check if stderr indicates a rate limit error.
+
+    Uses specific phrases to avoid false positives from other errors
+    like "context length limit exceeded" or "token limit".
+    """
+    lower = stderr.lower()
+    # Specific rate limit indicators (avoid generic "rate" or "limit" alone)
+    rate_limit_phrases = (
+        "rate limit",
+        "rate-limit",
+        "ratelimit",
+        "too many requests",
+        "quota exceeded",
+        "quota_exceeded",
+        "429",  # HTTP status code for rate limiting
+    )
+    return any(phrase in lower for phrase in rate_limit_phrases)
+
+
 def _cache_key(provider: str, model: str, prompt: str, context_hash: Optional[str] = None) -> str:
     """Generate cache key from provider, model, prompt, and optional context hash.
 
@@ -133,9 +153,7 @@ def call_claude(
         )
 
         if result.returncode != 0:
-            stderr = result.stderr.lower()
-            # Detect rate limit errors
-            if "rate" in stderr or "limit" in stderr or "429" in stderr or "too many" in stderr:
+            if _is_rate_limit_error(result.stderr):
                 raise RateLimitError(f"Claude rate limit: {result.stderr}")
             raise ProviderError(f"Claude CLI error: {result.stderr}")
 
@@ -225,9 +243,7 @@ def call_gemini(
             )
 
         if result.returncode != 0:
-            stderr = result.stderr.lower()
-            # Detect rate limit errors
-            if "rate" in stderr or "limit" in stderr or "429" in stderr or "quota" in stderr:
+            if _is_rate_limit_error(result.stderr):
                 raise RateLimitError(f"Gemini rate limit: {result.stderr}")
             raise ProviderError(f"Gemini CLI error: {result.stderr}")
 

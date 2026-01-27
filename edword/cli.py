@@ -299,7 +299,7 @@ def _serialize_contradiction(c) -> dict:
     }
 
 
-def _save_partial_results(storage, accumulator, results, chapters_to_load, selected_book, json_output, errors):
+def _save_partial_results(storage, accumulator, results, chapters_to_load, selected_book, json_output):
     """Save partial results when build is interrupted (e.g., rate limit)."""
     # Load cached chapters into accumulator
     for i, chapter_id in chapters_to_load:
@@ -992,7 +992,7 @@ def index_build(
 
         if rate_limit_hit:
             # Early exit for rate limit - save what we have
-            _save_partial_results(storage, accumulator, results, chapters_to_load, selected_book, json_output, errors)
+            _save_partial_results(storage, accumulator, results, chapters_to_load, selected_book, json_output)
             raise typer.Exit(1)
     else:
         # Sequential extraction (original behavior)
@@ -1073,7 +1073,7 @@ def index_build(
                 console.print(f"\n[red bold]Rate limit hit![/red bold] Halting build.")
                 console.print(f"[dim]Run 'edword index build' again to continue.[/dim]")
             # Save what we have and exit
-            _save_partial_results(storage, accumulator, results, chapters_to_load, selected_book, json_output, errors)
+            _save_partial_results(storage, accumulator, results, chapters_to_load, selected_book, json_output)
             raise typer.Exit(1)
 
     # Accumulate all results in chapter order (for non-JSON sequential mode, already done above)
